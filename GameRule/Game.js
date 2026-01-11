@@ -1,5 +1,4 @@
 var Game={
-    level:1,
     //Global variables
     HBOUND:innerWidth,//$('body')[0].scrollWidth
     VBOUND:innerHeight,//$('body')[0].scrollHeight
@@ -9,16 +8,28 @@ var Game={
         width:innerWidth-295,
         height:110
     },
+    team:0,
+    playerNum:2,//By default
     teams:{},
+    multiplayer:false,//By default
     cxt:$('#middleCanvas')[0].getContext('2d'),
     frontCxt:$('#frontCanvas')[0].getContext('2d'),
     backCxt:$('#backCanvas')[0].getContext('2d'),
+    fogCxt:$('#fogCanvas')[0].getContext('2d'),
     _timer:-1,
     _frameInterval:100,
-    _clock:0,
+    mainTick:0,
+    serverTick:0,
+    commands:{},
+    replay:{},
+    randomSeed:0,//For later use
     selectedUnit:{},
     allSelected:[],
     _oldAllSelected:[],
+    hackMode:false,
+    isApp:false,
+    offline:true,
+    CDN:'',
     addIntoAllSelected:function(chara,override){
         if (chara instanceof Gobj){
             //Add into allSelected if not included
@@ -49,6 +60,20 @@ var Game={
         //Notify referee to redraw
         Referee.alterSelectionMode();
     },
+    //To replace setTimeout
+    commandTimeout:function(func,delay){
+        var dueTick=Game.mainTick+(delay/100>>0);
+        if (!Game.commands[dueTick]) Game.commands[dueTick]=[];
+        Game.commands[dueTick].push(func);
+    },
+    //To replace setInterval
+    commandInterval:function(func,interval){
+        var funcAdjust=function(){
+            func();
+            Game.commandTimeout(funcAdjust,interval);
+        };
+        Game.commandTimeout(funcAdjust,interval);
+    },
     race:{
         selected:'Terran',//Terran race by default
         choose:function(race){
@@ -69,100 +94,109 @@ var Game={
         window.onresize=Game.resizeWindow;
         /*window.requestAnimationFrame=requestAnimationFrame || webkitRequestAnimationFrame
          || mozRequestAnimationFrame || msRequestAnimationFrame || oRequestAnimationFrame;//Old browser compatible*/
+        //Online mode
+        if (!Game.offline){
+            Game.CDN=prompt('Please input CDN location for images and audios:');
+            if (Game.CDN){
+                if (Game.CDN.indexOf('http://')!=0) Game.CDN='http://'+Game.CDN;
+                if (Game.CDN.lastIndexOf('/')!=Game.CDN.length-1) Game.CDN+='/';
+            }
+        }
         //Start loading
         Game.layerSwitchTo("GameLoading");
         //Zerg
-        sourceLoader.load("img","img/Charas/Mutalisk.png","Mutalisk");
-        sourceLoader.load("img","img/Charas/Devourer.png","Devourer");
-        sourceLoader.load("img","img/Charas/Guardian.png","Guardian");
-        sourceLoader.load("img","img/Charas/Overlord.png","Overlord");
-        sourceLoader.load("img","img/Charas/Drone.png","Drone");
-        sourceLoader.load("img","img/Charas/Zergling.png","Zergling");
-        sourceLoader.load("img","img/Charas/Hydralisk.png","Hydralisk");
-        sourceLoader.load("img","img/Charas/Scourge.png","Scourge");
-        sourceLoader.load("img","img/Charas/Lurker.png","Lurker");
-        sourceLoader.load("img","img/Charas/Ultralisk.png","Ultralisk");
-        sourceLoader.load("img","img/Charas/Broodling.png","Broodling");
-        sourceLoader.load("img","img/Charas/InfestedTerran.png","InfestedTerran");
-        sourceLoader.load("img","img/Charas/Queen.png","Queen");
-        sourceLoader.load("img","img/Charas/Defiler.png","Defiler");
-        sourceLoader.load("img","img/Charas/Larva.png","Larva");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Mutalisk.png","Mutalisk");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Devourer.png","Devourer");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Guardian.png","Guardian");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Overlord.png","Overlord");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Drone.png","Drone");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Zergling.png","Zergling");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Hydralisk.png","Hydralisk");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Scourge.png","Scourge");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Lurker.png","Lurker");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Ultralisk.png","Ultralisk");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Broodling.png","Broodling");
+        sourceLoader.load("img",Game.CDN+"img/Charas/InfestedTerran.png","InfestedTerran");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Queen.png","Queen");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Defiler.png","Defiler");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Larva.png","Larva");
         //Terran
-        sourceLoader.load("img","img/Charas/BattleCruiser.png","BattleCruiser");
-        sourceLoader.load("img","img/Charas/Wraith.png","Wraith");
-        sourceLoader.load("img","img/Charas/SCV.png","SCV");
-        sourceLoader.load("img","img/Charas/Civilian.png","Civilian");
-        sourceLoader.load("img","img/Charas/Marine.png","Marine");
-        sourceLoader.load("img","img/Charas/Firebat.png","Firebat");
-        sourceLoader.load("img","img/Charas/Ghost.png","Ghost");
-        sourceLoader.load("img","img/Charas/Vulture.png","Vulture");
-        sourceLoader.load("img","img/Charas/Tank.png","Tank");
-        sourceLoader.load("img","img/Charas/Goliath.png","Goliath");
-        sourceLoader.load("img","img/Charas/Medic.png","Medic");
-        sourceLoader.load("img","img/Charas/Dropship.png","Dropship");
-        sourceLoader.load("img","img/Charas/Vessel.png","Vessel");
-        sourceLoader.load("img","img/Charas/Valkyrie.png","Valkyrie");
+        sourceLoader.load("img",Game.CDN+"img/Charas/BattleCruiser.png","BattleCruiser");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Wraith.png","Wraith");
+        sourceLoader.load("img",Game.CDN+"img/Charas/SCV.png","SCV");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Civilian.png","Civilian");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Marine.png","Marine");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Firebat.png","Firebat");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Ghost.png","Ghost");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Vulture.png","Vulture");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Tank.png","Tank");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Goliath.png","Goliath");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Medic.png","Medic");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Dropship.png","Dropship");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Vessel.png","Vessel");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Valkyrie.png","Valkyrie");
         //Protoss
-        sourceLoader.load("img","img/Charas/Probe.png","Probe");
-        sourceLoader.load("img","img/Charas/Zealot.png","Zealot");
-        sourceLoader.load("img","img/Charas/Dragoon.png","Dragoon");
-        sourceLoader.load("img","img/Charas/Templar.png","Templar");
-        sourceLoader.load("img","img/Charas/DarkTemplar.png","DarkTemplar");
-        sourceLoader.load("img","img/Charas/Reaver.png","Reaver");
-        sourceLoader.load("img","img/Charas/Archon.png","Archon");
-        sourceLoader.load("img","img/Charas/DarkArchon.png","DarkArchon");
-        sourceLoader.load("img","img/Charas/Shuttle.png","Shuttle");
-        sourceLoader.load("img","img/Charas/Observer.png","Observer");
-        sourceLoader.load("img","img/Charas/Arbiter.png","Arbiter");
-        sourceLoader.load("img","img/Charas/Scout.png","Scout");
-        sourceLoader.load("img","img/Charas/Carrier.png","Carrier");
-        sourceLoader.load("img","img/Charas/Corsair.png","Corsair");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Probe.png","Probe");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Zealot.png","Zealot");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Dragoon.png","Dragoon");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Templar.png","Templar");
+        sourceLoader.load("img",Game.CDN+"img/Charas/DarkTemplar.png","DarkTemplar");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Reaver.png","Reaver");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Archon.png","Archon");
+        sourceLoader.load("img",Game.CDN+"img/Charas/DarkArchon.png","DarkArchon");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Shuttle.png","Shuttle");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Observer.png","Observer");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Arbiter.png","Arbiter");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Scout.png","Scout");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Carrier.png","Carrier");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Corsair.png","Corsair");
         //Neuture
-        sourceLoader.load("img","img/Charas/Ragnasaur.png","Ragnasaur");
-        sourceLoader.load("img","img/Charas/Rhynsdon.png","Rhynsdon");
-        sourceLoader.load("img","img/Charas/Ursadon.png","Ursadon");
-        sourceLoader.load("img","img/Charas/Bengalaas.png","Bengalaas");
-        sourceLoader.load("img","img/Charas/Scantid.png","Scantid");
-        sourceLoader.load("img","img/Charas/Kakaru.png","Kakaru");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Ragnasaur.png","Ragnasaur");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Rhynsdon.png","Rhynsdon");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Ursadon.png","Ursadon");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Bengalaas.png","Bengalaas");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Scantid.png","Scantid");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Kakaru.png","Kakaru");
         //Hero
-        sourceLoader.load("img","img/Charas/HeroCruiser.png","HeroCruiser");
-        sourceLoader.load("img","img/Charas/Sarah.png","Sarah");
-        sourceLoader.load("img","img/Charas/Kerrigan.png","Kerrigan");
+        sourceLoader.load("img",Game.CDN+"img/Charas/HeroCruiser.png","HeroCruiser");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Sarah.png","Sarah");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Kerrigan.png","Kerrigan");
+        sourceLoader.load("img",Game.CDN+"img/Charas/DevilHunter.png","DevilHunter");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Tassadar.png","Tassadar");
         //Building
-        sourceLoader.load("img","img/Charas/ZergBuilding.png","ZergBuilding");
-        sourceLoader.load("img","img/Charas/TerranBuilding.png","TerranBuilding");
-        sourceLoader.load("img","img/Charas/ProtossBuilding.png","ProtossBuilding");
+        sourceLoader.load("img",Game.CDN+"img/Charas/ZergBuilding.png","ZergBuilding");
+        sourceLoader.load("img",Game.CDN+"img/Charas/TerranBuilding.png","TerranBuilding");
+        sourceLoader.load("img",Game.CDN+"img/Charas/ProtossBuilding.png","ProtossBuilding");
         /*sourceLoader.load("audio","bgm/PointError.wav","PointError");*/
         //Map
-        sourceLoader.load("img","img/Maps/(2)Switchback.jpg","Map_Switchback");
-        sourceLoader.load("img","img/Maps/(2)Volcanis.jpg","Map_Volcanis");
-        sourceLoader.load("img","img/Maps/(3)Trench wars.jpg","Map_TrenchWars");
-        sourceLoader.load("img","img/Maps/(4)Blood Bath.jpg","Map_BloodBath");
-        sourceLoader.load("img","img/Maps/(4)Orbital Relay.jpg","Map_OrbitalRelay");
-        sourceLoader.load("img","img/Maps/(6)Thin Ice.jpg","Map_ThinIce");
-        sourceLoader.load("img","img/Maps/(8)BigGameHunters.jpg","Map_BigGameHunters");
-        sourceLoader.load("img","img/Maps/(8)TheHunters.jpg","Map_TheHunters");
-        sourceLoader.load("img","img/Maps/(8)Turbo.jpg","Map_Turbo");
-        sourceLoader.load("img","img/Maps/Map_Grass.jpg","Map_Grass");
-        sourceLoader.load("img","img/Charas/Mud.png","Mud");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(2)Switchback.jpg","Map_Switchback");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(2)Volcanis.jpg","Map_Volcanis");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(3)Trench wars.jpg","Map_TrenchWars");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(4)Blood Bath.jpg","Map_BloodBath");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(4)Orbital Relay.jpg","Map_OrbitalRelay");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(4)TowerDefense.jpg","Map_TowerDefense");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(6)Thin Ice.jpg","Map_ThinIce");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(8)BigGameHunters.jpg","Map_BigGameHunters");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(8)TheHunters.jpg","Map_TheHunters");
+        sourceLoader.load("img",Game.CDN+"img/Maps/(8)Turbo.jpg","Map_Turbo");
+        sourceLoader.load("img",Game.CDN+"img/Maps/Map_Grass.jpg","Map_Grass");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Mud.png","Mud");
         //Extra
-        sourceLoader.load("img","img/Charas/Burst.png","Burst");
-        sourceLoader.load("img","img/Charas/BuildingBurst.png","BuildingBurst");
-        sourceLoader.load("img","img/Charas/Portrait.png","Portrait");
-        sourceLoader.load("img","img/Charas/Magic.png","Magic");
-        sourceLoader.load("img","img/Menu/ControlPanel.png","ControlPanel");
-        sourceLoader.load("img","img/Bg/GameStart.jpg","GameStart");
-        sourceLoader.load("img","img/Bg/GamePlay.jpg","GamePlay");
-        sourceLoader.load("img","img/Bg/GameWin.jpg","GameWin");
-        sourceLoader.load("img","img/Bg/GameLose.jpg","GameLose");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Burst.png","Burst");
+        sourceLoader.load("img",Game.CDN+"img/Charas/BuildingBurst.png","BuildingBurst");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Portrait.png","Portrait");
+        sourceLoader.load("img",Game.CDN+"img/Charas/Magic.png","Magic");
+        sourceLoader.load("img",Game.CDN+"img/Menu/ControlPanel.png","ControlPanel");
+        sourceLoader.load("img",Game.CDN+"img/Bg/GameStart.jpg","GameStart");
+        sourceLoader.load("img",Game.CDN+"img/Bg/GameWin.jpg","GameWin");
+        sourceLoader.load("img",Game.CDN+"img/Bg/GameLose.jpg","GameLose");
 
         sourceLoader.allOnLoad(function(){
             $('#GameStart').prepend(sourceLoader.sources['GameStart']);
-            //$('#GamePlay').prepend(sourceLoader.sources['GamePlay']);
             $('#GameWin').prepend(sourceLoader.sources['GameWin']);
             $('#GameLose').prepend(sourceLoader.sources['GameLose']);
             $('#GamePlay>canvas').attr('width',Game.HBOUND);//Canvas width adjust
-            $('#GamePlay>canvas').attr('height',Game.VBOUND);//Canvas height adjust
+            $('#GamePlay>canvas').attr('height',Game.VBOUND-Game.infoBox.height+5);//Canvas height adjust
             for (var N=1;N<=9;N++){
                 $('div.panel_Control').append("<button num='"+N+"'></button>");
             }
@@ -184,24 +218,89 @@ var Game={
         }
         //Wait for user select level and play game
         $('input[name="levelSelect"]').click(function(){
-            Game.level=this.value;
+            //Prevent vibration
+            if (Game.level!=null) return;
+            Game.level=parseInt(this.value);
             Game.play();
         });
     },
     play:function(){
-        Resource.init();
-        //Load level
-        Levels[Game.level-1].load();//callback
-        //Wait for unit and building initialize
-        setTimeout(function(){
+        //Load level to initial when no error occurs
+        if (!(Levels[Game.level-1].load())){
+            //Need Game.playerNum before expansion
+            Game.expandUnitProps();
+            Resource.init();
             //Game background
             Game.layerSwitchTo("GamePlay");
             Game.resizeWindow();
+            //Collect login user info
+            if (Game.hackMode) Multiplayer.sendUserInfo();
             //Bind controller
             mouseController.toControlAll();//Can control all units
             keyController.start();//Start monitor
+            Game.pauseWhenHide();//Hew H5 feature:Page Visibility
+            Game.initIndexDB();//Hew H5 feature:Indexed DB
             Game.animation();
-        },0);
+        }
+    },
+    getPropArray:function(prop){
+        var result=[];
+        for (var N=0;N<Game.playerNum;N++){
+            result.push(typeof(prop)=='object'?(_$.clone(prop)):prop);
+        }
+        return result;
+    },
+    //Do we need this because we only support Zerg vs Terran vs Protoss?
+    expandUnitProps:function(){
+        //Post-operation for all unit types, prepare basic properties for different team numbers, init in level.js
+        _$.traverse([Zerg,Terran,Protoss,Neutral,Hero],function(unitType){
+            ['HP','SP','MP','damage','armor','speed','attackRange','attackInterval','plasma','sight'].forEach(function(prop){
+                //Prop array, first one for us, second for enemy
+                if (unitType.prototype[prop]!=undefined) {
+                    unitType.prototype[prop]=Game.getPropArray(unitType.prototype[prop]);
+                }
+            });
+            if (unitType.prototype.isInvisible){
+                for (var N=0;N<Game.playerNum;N++){
+                    unitType.prototype['isInvisible'+N]=unitType.prototype.isInvisible;
+                }
+            }
+            delete unitType.prototype.isInvisible;//No need anymore
+            if (unitType.prototype.attackMode) {
+                ['damage','attackRange','attackInterval'].forEach(function(prop){
+                    //Prop array, first one for us, second for enemy
+                    unitType.prototype.attackMode.flying[prop]=Game.getPropArray(unitType.prototype.attackMode.flying[prop]);
+                    unitType.prototype.attackMode.ground[prop]=Game.getPropArray(unitType.prototype.attackMode.ground[prop]);
+                });
+            }
+            unitType.upgrade=function(prop,value,team){
+                switch (team){
+                    case 0:case 1:case 2:case 3:case 4:case 5:case 6:case 7:
+                    eval('unitType.prototype.'+prop)[team]=value;
+                    break;
+                    default:
+                        unitType.prototype[prop]=value;
+                        break;
+                }
+            };
+        });
+        Protoss.Carrier.prototype.interceptorCapacity=Game.getPropArray(Protoss.Carrier.prototype.interceptorCapacity);
+        Protoss.Reaver.prototype.scarabCapacity=Game.getPropArray(Protoss.Reaver.prototype.scarabCapacity);
+        Referee.underArbiterUnits=Game.getPropArray([]);
+        Referee.detectedUnits=Game.getPropArray([]);
+        for (var N=0;N<Game.playerNum;N++){
+            //Initial detector buffer
+            var buffer={};
+            buffer['isInvisible'+N]=false;
+            Gobj.detectorBuffer.push(buffer);
+            //Initial arbiter buffer
+            Protoss.Arbiter.prototype.bufferObj['isInvisible'+N]=true;
+        }
+        for (var grade in Upgrade){
+            if (Upgrade[grade].level!=null) {
+                Upgrade[grade].level=Game.getPropArray(Upgrade[grade].level);
+            }
+        }
     },
     addSelectedIntoTeam:function(teamNum){
         //Build a new team
@@ -252,20 +351,31 @@ var Game={
         };
         //Initial
         var selectedOne={},charas=[];
-        if (isEnemyFilter==null){
-            if (unitBuildingFilter==null) charas=Unit.allUnits.concat(Building.allBuildings);
-            else if (unitBuildingFilter) charas=Unit.allUnits;
-            else charas=Building.allBuildings;
+        switch (unitBuildingFilter){
+            case true:
+                charas=Unit.allUnits;
+                break;
+            case false:
+                charas=Building.allBuildings;
+                break;
+            default:
+                charas=Unit.allUnits.concat(Building.allBuildings);
         }
-        else if (isEnemyFilter){
-            if (unitBuildingFilter==null) charas=Unit.allEnemyUnits().concat(Building.enemyBuildings);
-            else if (unitBuildingFilter) charas=Unit.allEnemyUnits();
-            else charas=Building.enemyBuildings;
-        }
-        else {
-            if (unitBuildingFilter==null) charas=Unit.allOurUnits().concat(Building.ourBuildings);
-            else if (unitBuildingFilter) charas=Unit.allOurUnits();
-            else charas=Building.ourBuildings;
+        switch (isEnemyFilter){
+            case true:case false:
+                charas=charas.filter(function(chara){
+                    return chara.isEnemy()==isEnemyFilter;
+                });
+                break;
+            case 0:case 1:case 2:case 3:case 4:case 5:case 6:case 7:
+                charas=charas.filter(function(chara){
+                    return chara.team==isEnemyFilter;
+                });
+                break;
+            case '0':case '1':case '2':case '3':case '4':case '5':case '6':case '7':
+                charas=charas.filter(function(chara){
+                    return chara.team!=isEnemyFilter;
+                });
         }
         if (isFlyingFilter!=null) {
             charas=charas.filter(function(chara){
@@ -288,20 +398,31 @@ var Game={
     getInRangeOnes:function(clickX,clickY,range,isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter){
         //Initial
         var selectedOnes=[],charas=[];
-        if (isEnemyFilter==null){
-            if (unitBuildingFilter==null) charas=Unit.allUnits.concat(Building.allBuildings);
-            else if (unitBuildingFilter) charas=Unit.allUnits;
-            else charas=Building.allBuildings;
+        switch (unitBuildingFilter){
+            case true:
+                charas=Unit.allUnits;
+                break;
+            case false:
+                charas=Building.allBuildings;
+                break;
+            default:
+                charas=Unit.allUnits.concat(Building.allBuildings);
         }
-        else if (isEnemyFilter){
-            if (unitBuildingFilter==null) charas=Unit.allEnemyUnits().concat(Building.enemyBuildings);
-            else if (unitBuildingFilter) charas=Unit.allEnemyUnits();
-            else charas=Building.enemyBuildings;
-        }
-        else {
-            if (unitBuildingFilter==null) charas=Unit.allOurUnits().concat(Building.ourBuildings);
-            else if (unitBuildingFilter) charas=Unit.allOurUnits();
-            else charas=Building.ourBuildings;
+        switch (isEnemyFilter){
+            case true:case false:
+                charas=charas.filter(function(chara){
+                    return chara.isEnemy()==isEnemyFilter;
+                });
+                break;
+            case 0:case 1:case 2:case 3:case 4:case 5:case 6:case 7:
+                charas=charas.filter(function(chara){
+                    return chara.team==isEnemyFilter;
+                });
+                break;
+            case '0':case '1':case '2':case '3':case '4':case '5':case '6':case '7':
+                charas=charas.filter(function(chara){
+                    return chara.team!=isEnemyFilter;
+                });
         }
         if (isFlyingFilter!=null) {
             charas=charas.filter(function(chara){
@@ -324,33 +445,7 @@ var Game={
             return chara.selected;
         });
     },
-    //Sort units from nearest to far away
-    getNearbyOnes:function(clickX,clickY,isEnemyFilter){
-        //Initial
-        var units=[];
-        //No filter, all units
-        if (isEnemyFilter==undefined) units=Unit.allUnits.concat(Building.allBuildings);//_$.copy(Unit.allUnits)
-        else {
-            //Only enemy units
-            if (isEnemyFilter) units=Unit.allEnemyUnits().concat(Building.enemyBuildings);//_$.copy(Unit.allEnemyUnits())
-            //Only our units
-            else units=Unit.allOurUnits().concat(Building.ourBuildings);//_$.copy(Unit.allOurUnits())
-        }
-        units.sort(function(unit1,unit2){
-            return (unit1.posX()-clickX)*(unit1.posX()-clickX)+(unit1.posY()-clickY)*(unit1.posY()-clickY)
-                -(unit2.posX()-clickX)*(unit2.posX()-clickX)-(unit2.posY()-clickY)*(unit2.posY()-clickY);
-        });
-        return units;
-    },
-    getNearestOne:function(clickX,clickY,isEnemyFilter){
-        return Game.getNearbyOnes(clickX,clickY,isEnemyFilter)[0];
-    },
-    changeSelectedTo:function(chara){
-        Game.selectedUnit=chara;
-        Button.equipButtonsFor(chara);
-        if (chara instanceof Gobj){
-            chara.selected=true;
-        }
+    showInfoFor:function(chara){
         //Show selected living unit info
         if (Game.selectedUnit instanceof Gobj && Game.selectedUnit.status!="dead") {
             //Display info
@@ -417,9 +512,26 @@ var Game={
             else {
                 $('div.infoCenter p.plasma').hide();
             }
+            //Can disable this filter for testing
+            if (Game.selectedUnit.loadedUnits && Game.selectedUnit.team==Game.team) {
+                $('div.infoCenter p.passenger span')[0].innerHTML=Game.selectedUnit.loadedUnits.length;
+                $('div.infoCenter p.passenger').show();
+                //Clear old icons
+                $('div.infoCenter p.icons')[0].innerHTML='';
+                //Show passenger icons
+                Game.selectedUnit.loadedUnits.forEach(function(passenger){
+                    $('div.infoCenter p.icons').append($('<span></span>')
+                        .attr('class',passenger.name).css('border-color',passenger.lifeStatus()));
+                });
+                $('div.infoCenter p.icons').show();
+            }
+            else {
+                $('div.infoCenter p.passenger').hide();
+                $('div.infoCenter p.icons').hide();
+            }
             //Draw upgraded
             var upgraded=Game.selectedUnit.upgrade;
-            var team=Number(Boolean(Game.selectedUnit.isEnemy));
+            var team=Game.selectedUnit.team;
             if (upgraded){
                 for (var N=0;N<3;N++){
                     var upgradeIcon=$('div.upgraded div[name="icon"]')[N];
@@ -451,6 +563,17 @@ var Game={
             $('div.panel_Info>div').hide();
         }
     },
+    refreshInfo:function(){
+        Game.showInfoFor(Game.selectedUnit);
+    },
+    changeSelectedTo:function(chara){
+        Game.selectedUnit=chara;
+        Button.equipButtonsFor(chara);
+        if (chara instanceof Gobj){
+            chara.selected=true;
+        }
+        Game.showInfoFor(chara);
+    },
     draw:function(chara){
         //Can draw units and no-rotate bullets
         if (!(chara instanceof Gobj)) return;//Will only show Gobj
@@ -468,9 +591,14 @@ var Game={
         //Close shadow for burrowed
         if (chara.buffer.Burrow) cxt.shadowOffsetX=cxt.shadowOffsetY=0;
         //Draw invisible
-        if (chara.isInvisible!=undefined){
-            cxt.globalAlpha=(chara.isEnemy && chara.isInvisible)?0:0.5;
-            if (chara.burrowBuffer && !chara.isEnemy) cxt.globalAlpha=1;
+        if (chara['isInvisible'+Game.team]!=null){
+            cxt.globalAlpha=(chara.isEnemy() && chara['isInvisible'+Game.team])?0:0.5;
+            if (chara.burrowBuffer){
+                if (chara.isEnemy()){
+                    if (!chara['isInvisible'+Game.team]) cxt.globalAlpha=1;
+                }
+                else cxt.globalAlpha=1;
+            }
         }
         //Draw unit or building
         var imgSrc;
@@ -525,7 +653,7 @@ var Game={
         if (chara.selected==true){
             cxt=Game.frontCxt;
             //Draw selected circle
-            cxt.strokeStyle=(chara.isEnemy)?"red":"green";//Distinguish enemy
+            cxt.strokeStyle=(chara.isEnemy())?"red":"green";//Distinguish enemy
             cxt.lineWidth=2;//Cannot see 1px width circle clearly
             cxt.beginPath();
             cxt.arc(chara.posX()-Map.offsetX,chara.posY()-Map.offsetY,chara.radius(),0,2*Math.PI);
@@ -597,12 +725,6 @@ var Game={
         cxt.restore();
     },
     drawBullet:function(chara){
-        //Bullet array
-        if (chara instanceof Array) {
-            chara.forEach(function(bullet){
-                Game.drawBullet(bullet);
-            });
-        }
         //Can draw bullets need rotate
         if (!(chara instanceof Bullets)) return;//Will only show bullet
         if (chara.status=="dead") return;//Will not show dead
@@ -665,30 +787,39 @@ var Game={
     },
     drawSourceBox:function(){
         //Update min, gas, curMan and totalMan
-        $('div.resource_Box span.mineNum')[0].innerHTML=Resource[0].mine;
-        $('div.resource_Box span.gasNum')[0].innerHTML=Resource[0].gas;
-        $('div.resource_Box span.manNum>span')[0].innerHTML=Resource[0].curMan;
-        $('div.resource_Box span.manNum>span')[1].innerHTML=Resource[0].totalMan;
+        $('div.resource_Box span.mineNum')[0].innerHTML=Resource[Game.team].mine;
+        $('div.resource_Box span.gasNum')[0].innerHTML=Resource[Game.team].gas;
+        $('div.resource_Box span.manNum>span')[0].innerHTML=Resource[Game.team].curMan;
+        $('div.resource_Box span.manNum>span')[1].innerHTML=Resource[Game.team].totalMan;
         //Check if man overflow
-        $('div.resource_Box span.manNum')[0].style.color=(Resource[0].curMan>Resource[0].totalMan)?"red":"#00ff00";
+        $('div.resource_Box span.manNum')[0].style.color=(Resource[Game.team].curMan>Resource[Game.team].totalMan)?"red":"#00ff00";
     },
     drawProcessingBox:function(){
         //Show processing box if it's processing
         var processing=Game.selectedUnit.processing;
-        if (processing){
+        //Can disable this filter for testing
+        if (processing && Game.selectedUnit.team==Game.team){
             $('div.upgrading div[name="icon"]')[0].className=processing.name;
-            var percent=((new Date().getTime()-processing.startTime)/(processing.time)+0.5)>>0;
-            //var percent=((Game._clock-processing.startTime)*100/(processing.time)+0.5)>>0;
+            //var percent=((new Date().getTime()-processing.startTime)/(processing.time)+0.5)>>0;
+            var percent=((Game.mainTick-processing.startTime)*100/(processing.time)+0.5)>>0;
             $('div.upgrading div[name="processing"] span')[0].innerHTML=percent;
             $('div.upgrading div[name="processing"] div.processedBar')[0].style.width=percent+'%';
             $('div.upgrading').attr('title',processing.name).show();
-            /*$('div.upgrading div[name="icon"]')[0].setAttribute('title',processing.name);
-            $('div.upgrading')[0].style.display='block';*/
         }
         else {
-            $('div.upgrading').removeAttr('title').hide();
-            /*delete $('div.upgrading div[name="icon"]')[0].title;
-            $('div.upgrading')[0].style.display='none';*/
+            //Select nothing, show replay progress
+            if (Game.replayFlag && Game.endTick>0){
+                $('div.upgrading div[name="icon"]')[0].className='Replay';
+                var percent=(Game.mainTick*100/(Game.endTick)+0.5)>>0;
+                $('div.upgrading div[name="processing"] span')[0].innerHTML=percent;
+                $('div.upgrading div[name="processing"] div.processedBar')[0].style.width=percent+'%';
+                $('div.upgrading').attr('title','Replay Progress').show();
+                if (!(Game.selectedUnit instanceof Gobj)){
+                    $('div.infoRight').show();
+                    $('div.upgraded').hide();
+                }
+            }
+            else $('div.upgrading').removeAttr('title').hide();
         }
     },
     refreshMultiSelectBox:function(){
@@ -733,91 +864,75 @@ var Game={
         }
     },
     animation:function(){
-        var loop=function(){
+        Game.animation.loop=function(){
+            //Process due commands for current frame before drawing
+            var commands=Game.commands[Game.mainTick];
+            if (commands instanceof Array){
+                for (var N=0;N<commands.length;N++){
+                    commands[N]();
+                }
+                delete Game.commands[Game.mainTick];
+            }
+            /************ Draw part *************/
             //Clear all canvas
             Game.cxt.clearRect(0,0,Game.HBOUND,Game.VBOUND);
             Game.frontCxt.clearRect(0,0,Game.HBOUND,Game.VBOUND);
-            //Game.backCxt.clearRect(0,0,Game.HBOUND,Game.VBOUND);//Only clear when refresh map
-            //Layer0: Refresh map if needed
+            //DrawLayer0: Refresh map if needed
+            if (mouseController.mouseX<Map.triggerMargin) Map.needRefresh="LEFT";
+            if (mouseController.mouseX>(Game.HBOUND-Map.triggerMargin)) Map.needRefresh="RIGHT";
+            if (mouseController.mouseY<Map.triggerMargin) Map.needRefresh="TOP";
+            if (mouseController.mouseY>(Game.VBOUND-Map.triggerMargin)) Map.needRefresh="BOTTOM";
             if (Map.needRefresh) {
                 Map.refresh(Map.needRefresh);
                 Map.needRefresh=false;
             }
-            //Layer1: Show all buildings
+            //DrawLayer1: Show all buildings
             for (var N=0;N<Building.allBuildings.length;N++){
                 var build=Building.allBuildings[N];
                 //GC
                 if (build.status=="dead") {
-                    if (build.isEnemy) {
-                        var index=$.inArray(build,Building.enemyBuildings);
-                        Building.enemyBuildings.splice(index,(index==-1)?0:1);
-                    }
-                    else {
-                        var index=$.inArray(build,Building.ourBuildings);
-                        Building.ourBuildings.splice(index,(index==-1)?0:1);
-                    }
                     Building.allBuildings.splice(N,1);
                     N--;//Next unit come to this position
                     continue;
                 }
                 //Draw
                 Game.draw(build);
-                //Attackable building has bullet
-                if (build.bullet) {
-                    Game.drawBullet(build.bullet);}
-                //Add this makes attackable building intelligent for attack
-                if (build.AI) build.AI();
             }
-            //Layer2: Show all existed units
+            //DrawLayer2: Show all existed units
             for (var N=0;N<Unit.allUnits.length;N++){
                 var chara=Unit.allUnits[N];
                 //GC
                 if (chara.status=="dead") {
-                    if (chara.isFlying) {
-                        if (chara.isEnemy) {
-                            var index=$.inArray(chara,Unit.enemyFlyingUnits);
-                            Unit.enemyFlyingUnits.splice(index,(index==-1)?0:1);
-                        }
-                        else {
-                            var index=$.inArray(chara,Unit.ourFlyingUnits);
-                            Unit.ourFlyingUnits.splice(index,(index==-1)?0:1);
-                        }
-                    }
-                    else {
-                        if (chara.isEnemy) {
-                            var index=$.inArray(chara,Unit.enemyGroundUnits);
-                            Unit.enemyGroundUnits.splice(index,(index==-1)?0:1);
-                        }
-                        else {
-                            var index=$.inArray(chara,Unit.ourGroundUnits);
-                            Unit.ourGroundUnits.splice(index,(index==-1)?0:1);
-                        }
-                    }
                     Unit.allUnits.splice(N,1);
-                    N--;//Next unit come to this position
+                    N--;
                     continue;
                 }
                 //Draw
                 Game.draw(chara);
-                //Attackable unit bullet or magic bullet
-                if (chara.bullet) Game.drawBullet(chara.bullet);
-                //Add this makes chara intelligent for attack
-                if (chara.attack) chara.AI();
-                //Judge reach destination
-                Referee.judgeReachDestination(chara);
             }
-            //Layer3: Draw effects above units
+            //DrawLayer3: Draw all bullets
+            for (var N=0;N<Bullets.allBullets.length;N++){
+                var bullet=Bullets.allBullets[N];
+                //GC
+                if (bullet.status=="dead" && bullet.used) {
+                    Bullets.allBullets.splice(N,1);
+                    N--;
+                    continue;
+                }
+                Game.drawBullet(bullet);
+            }
+            //DrawLayer4: Draw effects above units
             for (var N=0;N<Burst.allEffects.length;N++){
                 var effect=Burst.allEffects[N];
                 //GC
                 if (effect.status=="dead" || (effect.target && effect.target.status=="dead")) {
                     Burst.allEffects.splice(N,1);
-                    N--;//Next unit come to this position
+                    N--;
                     continue;
                 }
                 Game.drawEffect(effect);
             }
-            //Layer4: Draw drag rect
+            //DrawLayer5: Draw drag rect
             if (mouseController.drag) {
                 Game.cxt.lineWidth=3;
                 Game.cxt.strokeStyle="green";
@@ -825,44 +940,72 @@ var Game={
                     mouseController.endPoint.x-mouseController.startPoint.x,
                     mouseController.endPoint.y-mouseController.startPoint.y);
             }
-            //LayerBottom: Draw info box and resource box
+            //DrawLayerBottom: Draw info box and resource box
             Game.drawInfoBox();
             Game.drawSourceBox();
             Game.drawProcessingBox();
-            //Release selected unit when unit died or is invisible enemy
-            if (Game.selectedUnit.status=="dead" || (Game.selectedUnit.isInvisible && Game.selectedUnit.isEnemy)) {
-                Game.selectedUnit.selected=false;
-                Game.changeSelectedTo({});
-            }
-            //Mr.Referee will judge Arbiter's effect
-            Referee.judgeArbiter();
-            //Mr.Referee will judge detector: override Arbiter effect
-            Referee.judgeDetect();
-            //Adjust location for collision
-            Referee.judgeCollision();
-            //Mr.Referee will recover charas when needed
-            Referee.judgeRecover();
-            //Mr.Referee will kill die survivor
-            Referee.judgeDying();
-            //Update man data
-            Referee.judgeMan();
-            //Mr.Referee will help add larvas
-            Referee.addLarva();
-            //Mr.Referee will monitor mini map every 1 sec
-            Referee.monitorMiniMap();
-            //Mr.Referee will cover fogs on maps every 1 sec
-            Referee.coverFog();
-            //Mr.Referee will alter info box mode every 1 sec
-            Referee.alterSelectionMode();
-            //Mr.Referee will judge win/lose once each loop
-            Referee.judgeWinLose();
+            /************ Calculate for next frame *************/
             //Clock ticking
-            Game._clock++;
+            Game.mainTick++;
+            //For network mode
+            if (Multiplayer.ON){
+                //Send current tick to server
+                Multiplayer.webSocket.send(JSON.stringify({
+                    type:'tick',
+                    tick:Game.mainTick,
+                    cmds:(Multiplayer.cmds.length?Multiplayer.cmds:null)
+                }));
+            }
+            else {
+                //Record user moves and execute if have
+                if (Multiplayer.cmds.length>0) {
+                    //MainTick++ just before this code piece
+                    Game.replay[Game.mainTick]=$.extend([],Multiplayer.cmds);
+                    //Execute command
+                    Multiplayer.parseTickCmd({
+                        tick:Game.mainTick,
+                        cmds:Multiplayer.cmds
+                    });
+                }
+            }
+            //Clear commands
+            if (Multiplayer.cmds.length>0){
+                Multiplayer.cmds=[];
+            }
+            //Postpone play frames and AI after drawing (consume time)
+            Building.allBuildings.concat(Unit.allUnits).concat(Bullets.allBullets).concat(Burst.allEffects).forEach(function(chara){
+                //Add this makes chara intelligent for attack
+                if (chara.AI) chara.AI();
+                //Judge reach destination
+                if (chara instanceof Unit) Referee.judgeReachDestination(chara);
+                //Join timers together
+                chara.playFrames();
+            });
+            //Will invite Mr.Referee to make some judgments
+            Referee.tasks.forEach(function(task){
+                Referee[task]();
+            });
+            //Release selected unit when unit died or is invisible enemy
+            if (Game.selectedUnit instanceof Gobj){
+                if (Game.selectedUnit.status=="dead" || (Game.selectedUnit['isInvisible'+Game.team] && Game.selectedUnit.isEnemy())) {
+                    Game.selectedUnit.selected=false;
+                    Game.changeSelectedTo({});
+                }
+            }
         };
-        Game._timer=setInterval(loop,Game._frameInterval);
+        if (Multiplayer.ON){
+            Game._timer=setInterval(function(){
+                if (Game.mainTick<Game.serverTick) Game.animation.loop();
+            },Game._frameInterval);
+        }
+        else Game.startAnimation();
     },
     stopAnimation:function(){
-        clearInterval(Game._timer);
+        if (Game._timer!=-1) clearInterval(Game._timer);
+        Game._timer=-1;
+    },
+    startAnimation:function(){
+        if (Game._timer==-1) Game._timer=setInterval(Game.animation.loop,Game._frameInterval);
     },
     stop:function(charas){
         charas.forEach(function(chara){
@@ -871,22 +1014,53 @@ var Game={
         Game.stopAnimation();
     },
     win:function(){
-        Game.stop(Unit.allUnits);
-        $('div#GamePlay').fadeOut(3000);
-        setTimeout(function(){
+        if (Multiplayer.ON){
+            Multiplayer.webSocket.send(JSON.stringify({
+                type:'getReplay'
+            }));
+        }
+        else {
+            Game.saveReplay();
+            Game.saveReplayIntoDB();
+        }
+        $('div#GamePlay').fadeOut(3000,function(){
+            Game.stop(Unit.allUnits);
+            //Win poster
             Game.layerSwitchTo("GameWin");
-            //Sound effect
-            new Audio('bgm/GameWin.wav').play();
-        },3000);
+            new Audio(Game.CDN+'bgm/GameWin.wav').play();
+        });
+        //Self destruction to prevent duplicate fadeout
+        Game.win=function(){};
     },
     lose:function(){
-        Game.stop(Unit.allUnits);
-        $('div#GamePlay').fadeOut(3000);
-        setTimeout(function(){
+        if (Multiplayer.ON){
+            Multiplayer.webSocket.send(JSON.stringify({
+                type:'getReplay'
+            }));
+        }
+        else {
+            Game.saveReplay();
+            Game.saveReplayIntoDB();
+        }
+        $('div#GamePlay').fadeOut(3000,function(){
+            Game.stop(Unit.allUnits);
+            //Lose poster
             Game.layerSwitchTo("GameLose");
-            //Sound effect
-            new Audio('bgm/GameLose.wav').play();
-        },3000);
+            new Audio(Game.CDN+'bgm/GameLose.wav').play();
+        });
+        //Self destruction to prevent duplicate fadeout
+        Game.lose=function(){};
+    },
+    saveReplay:function(replayData){
+        if (!Game.replayFlag) {
+            localStorage.setItem('lastReplay',JSON.stringify({
+                level:Game.level,
+                team:Game.team,
+                //Save Game.replay by default
+                cmds:(replayData!=null)?replayData:(Game.replay),
+                end:Game.mainTick
+            }));
+        }
     },
     showWarning:function(msg,interval){
         //Default interval
@@ -898,16 +1072,43 @@ var Game={
             $('div.warning_Box').html('').hide();
         },interval);
     },
-    showMessage:function(msg,interval){
-        //Default interval
-        if (!interval) interval=3000;
-        //Show message for a period
-        $('div.message_Box').html(msg).show();
-        //Hide message after a period
-        setTimeout(function(){
-            $('div.message_Box').html('').hide();
-        },interval);
-    },
+    showMessage:function(){
+        //Clossure timer
+        var _timer=0;
+        return function(msg,interval){
+            //Default interval
+            if (!interval) interval=3000;
+            //Show message for a period
+            $('div.message_Box').append('<p>'+msg+'</p>').show();
+            //Can show multiple lines together
+            if (_timer) clearTimeout(_timer);
+            //Hide message after a period
+            _timer=setTimeout(function(){
+                $('div.message_Box').html('').hide();
+            },interval);
+        };
+    }(),
+    //Return from 0 to 0.99
+    getNextRandom:(function(){
+        //Clossure variable and function
+        var rands=[];
+        var getRands=function(){
+            //Use current tick as seed
+            var seed=Game.mainTick+Game.randomSeed;
+            var rands=[];
+            for (var N=0;N<100;N++){
+                //Seed grows up in range 100
+                seed=(seed*21+3)%100;
+                rands.push(seed);
+            }
+            return rands;
+        };
+        return function(){
+            //If all rands used, generate new ones
+            if (rands.length==0) rands=getRands();
+            return rands.shift()/100;
+        };
+    })(),
     resizeWindow:function(){
         //Update parameters
         Game.HBOUND=innerWidth;//$('body')[0].scrollWidth
@@ -915,18 +1116,76 @@ var Game={
         Game.infoBox.width=Game.HBOUND-295;
         Game.infoBox.y=Game.VBOUND-110;
         //Resize canvas
-        $('#GamePlay>canvas')[0].width=Game.HBOUND;
-        $('#GamePlay>canvas')[0].height=Game.VBOUND;
-        Map.fogCanvas.width=Game.HBOUND;
-        Map.fogCanvas.height=Game.VBOUND-Game.infoBox.height+5;
+        $('#GamePlay>canvas').attr('width',Game.HBOUND);//Canvas width adjust
+        $('#GamePlay>canvas').attr('height',Game.VBOUND-Game.infoBox.height+5);//Canvas height adjust
         //Resize panel_Info
         $('div.panel_Info')[0].style.width=((Game.HBOUND-295)+'px');
-        //Update map inside-stroke size
-        Map.insideStroke.width=(130*Game.HBOUND/Map.getCurrentMap().width)>>0;
-        Map.insideStroke.height=(130*Game.VBOUND/Map.getCurrentMap().height)>>0;
-        //Redraw map
-        Map.draw();
-        //Need re-calculate fog immediately
-        Map.refreshFog();
+        if (Map.ready){
+            //Update map inside-stroke size
+            Map.insideStroke.width=(130*Game.HBOUND/Map.getCurrentMap().width)>>0;
+            Map.insideStroke.height=(130*Game.VBOUND/Map.getCurrentMap().height)>>0;
+            //Redraw background
+            Map.drawBg();
+            //Need re-calculate fog immediately
+            Map.drawFogAndMinimap();
+        }
+    },
+    getCurrentTs:function(){
+        var now=new Date();
+        var formatNum=function(num){
+            if (num<10) return ('0'+num);
+            else return num.toString();
+        };
+        var timestamp=now.getFullYear()+'-'+formatNum(now.getMonth()+1)+'-'+formatNum(now.getDate())+' '
+            +formatNum(now.getHours())+':'+formatNum(now.getMinutes())+':'+formatNum(now.getSeconds());
+        return timestamp;
+    },
+    //New H5 features demo
+    pauseWhenHide:function(){
+        //Add pause when hide window
+        $(document).on('visibilitychange',function(){
+            if ($(document).attr('hidden')!=null){
+                if ($(document).attr('hidden')){
+                    Button.pauseHandler();
+                    $('title').html('Paused...');
+                }
+                else {
+                    Button.playHandler();
+                    $('title').html('StarCraft');
+                }
+            }
+        });
+    },
+    initIndexDB:function(){
+        window.indexedDB=(indexedDB || webkitIndexedDB || mozIndexedDB || msIndexedDB);
+        var connect=indexedDB.open('StarCraftHTML5',1);
+        connect.onupgradeneeded=function(evt){
+            var db=evt.target.result;
+            var objStore=db.createObjectStore('Replays',{keyPath:'id',autoIncrement:true});
+            objStore.createIndex('levelIndex','level',{unique:false});
+            objStore.createIndex('teamIndex','team',{unique:false});
+            objStore.createIndex('endIndex','end',{unique:false});
+            objStore.createIndex('msIndex','millisec',{unique:false});
+            objStore.createIndex('tsIndex','timestamp',{unique:false});
+            objStore.createIndex('offlineIndex','offline',{unique:false});
+            db.close();
+        }
+    },
+    saveReplayIntoDB:function(){
+        var connect=indexedDB.open('StarCraftHTML5',1);
+        connect.onsuccess=function(evt){
+            var db=evt.target.result;
+            var objStore=db.transaction(['Replays'],'readwrite').objectStore('Replays');
+            objStore.add({
+                level:Game.level,
+                team:Game.team,
+                cmds:Game.replay,
+                end:Game.mainTick,
+                millisec:new Date().getTime(),
+                timestamp:Game.getCurrentTs(),
+                offline:Boolean(Game.offline).toString()
+            });
+            db.close();
+        }
     }
 };

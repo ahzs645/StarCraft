@@ -2,23 +2,20 @@ var Building=Gobj.extends({
     constructorPlus:function(props){
         //Add id for building
         this.id=Unit.currentID++;
-        this.isEnemy=Boolean(props.isEnemy);//false by default
         this.life=this.get('HP');
         if (this.SP) this.shield=this.get('SP');
         if (this.MP) this.magic=50;
         this.selected=false;
         this.isFlying=false;
+        this.injuryAnimations=[];
         // Finish below after fully constructed, postpone
         var myself=this;
-        setTimeout(function(){
+        Game.commandTimeout(function(){
             //Add this unit into Game
             Building.allBuildings.push(myself);
-            if (myself.isEnemy) Building.enemyBuildings.push(myself);
-            else Building.ourBuildings.push(myself);
             //Show unit
             myself.dock();
         },0);
-
     },
     prototypePlus:{
         name:"Building",
@@ -41,10 +38,11 @@ var Building=Gobj.extends({
             //Launch new dock timer
             this.status="dock";
             var myself=this;
-            this._timer=setInterval(function(){
+            var animateFrame=function(){
                 //Only play animation, will not move
                 myself.animeFrame();
-            },100);
+            };
+            this.allFrames['animate']=animateFrame;
         },
         //Cannot move
         moving:function(){
@@ -55,6 +53,10 @@ var Building=Gobj.extends({
             //Old behavior
             Gobj.prototype.die.call(this);
             this.life=0;
+            //Clear all injury animations
+            this.injuryAnimations.forEach(function(anime){
+                anime.die();
+            });
             //If has sound effect
             if (this.sound.death && this.insideScreen()) {
                 this.sound.death.play();
@@ -107,15 +109,23 @@ var Building=Gobj.extends({
 });
 //Store all buildings
 Building.allBuildings=[];
-Building.ourBuildings=[];
-Building.enemyBuildings=[];
+Building.ourBuildings=function(){
+    return Building.allBuildings.filter(function(chara){
+        return !(chara.isEnemy());
+    });
+};
+Building.enemyBuildings=function(){
+    return Building.allBuildings.filter(function(chara){
+        return chara.isEnemy();
+    });
+};
 
 //Zerg buildings
 Building.ZergBuilding=Building.extends({
     constructorPlus:function(props){
         this.sound={
-            selected:new Audio('bgm/ZergBuilding.selected.wav'),
-            death:new Audio('bgm/ZergBuilding.death.wav')
+            selected:new Audio(Game.CDN+'bgm/ZergBuilding.selected.wav'),
+            death:new Audio(Game.CDN+'bgm/ZergBuilding.death.wav')
         };
         //Need draw mud for it
         Map.needRefresh="MAP";
@@ -123,11 +133,11 @@ Building.ZergBuilding=Building.extends({
     prototypePlus: {
         //Add basic unit info
         name: "ZergBuilding",
-        portraitOffset: {x:0,y:168},
         dieEffect:Burst.ZergBuildingBurst,
+        injuryNames:['bloodA','bloodB','bloodC'],
         recover:function(){
             if (this.life<this.get('HP')) this.life+=0.5;
-            if (this.magic!=undefined && this.magic<this.get('MP')) this.magic+=0.5;
+            if (this.magic!=null && this.magic<this.get('MP')) this.magic+=0.5;
         }
     }
 });
@@ -135,17 +145,20 @@ Building.ZergBuilding=Building.extends({
 Building.TerranBuilding=Building.extends({
     constructorPlus:function(props){
         this.sound={
-            selected:new Audio('bgm/TerranBuilding.selected.wav'),
-            death:new Audio('bgm/TerranBuilding.death.wav')
+            normal:new Audio(Game.CDN+'bgm/TerranBuilding.selected.wav'),
+            onfire:new Audio(Game.CDN+'bgm/Building.onfire.wav'),
+            death:new Audio(Game.CDN+'bgm/TerranBuilding.death.wav')
         };
+        this.sound.selected=this.sound.normal;
     },
     prototypePlus: {
         //Add basic unit info
         name: "TerranBuilding",
-        portraitOffset: {x:780,y:56},
         dieEffect:Burst.TerranBuildingBurst,
+        injuryNames:['redFireL','redFireM','redFireR'],
         recover:function(){
-            if (this.magic!=undefined && this.magic<this.get('MP')) this.magic+=0.5;
+            if (this.life<(this.get('HP')/4) && (this instanceof Building)) this.life--;
+            if (this.magic!=null && this.magic<this.get('MP')) this.magic+=0.5;
         }
     }
 });
@@ -153,26 +166,27 @@ Building.TerranBuilding=Building.extends({
 Building.ProtossBuilding=Building.extends({
     constructorPlus:function(props){
         this.sound={
-            selected:new Audio('bgm/ProtossBuilding.selected.wav'),
-            death:new Audio('bgm/ProtossBuilding.death.wav')
+            normal:new Audio(Game.CDN+'bgm/ProtossBuilding.selected.wav'),
+            onfire:new Audio(Game.CDN+'bgm/Building.onfire.wav'),
+            death:new Audio(Game.CDN+'bgm/ProtossBuilding.death.wav')
         };
+        this.sound.selected=this.sound.normal;
     },
     prototypePlus: {
         //Add basic unit info
         name: "ProtossBuilding",
         plasma:0,
-        portraitOffset: {x:900,y:112},
         dieEffect:Burst.ProtossBuildingBurst,
+        injuryNames:['blueFireL','blueFireM','blueFireR'],
         recover:function(){
             if (this.shield<this.get('SP')) this.shield+=0.5;
-            if (this.magic!=undefined && this.magic<this.get('MP')) this.magic+=0.5;
+            if (this.magic!=null && this.magic<this.get('MP')) this.magic+=0.5;
         }
     }
 });
 //Attackable interface
 Building.Attackable={
     constructorPlus:function(props){
-        this.attackTimer=0;
         this.bullet={};
         this.kill=0;
         this.target={};
@@ -188,8 +202,8 @@ Building.Attackable={
         matchAttackLimit:AttackableUnit.prototype.matchAttackLimit,
         attack:function(enemy){
             //Cannot attack invisible unit or unit who mismatch your attack type
-            if (enemy.isInvisible || !(this.matchAttackLimit(enemy))) {
-                Referee.voice.pError.play();
+            if (enemy['isInvisible'+this.team] || !(this.matchAttackLimit(enemy))) {
+                Referee.voice('pError').play();
                 this.stopAttack();
                 return;
             }
@@ -202,32 +216,43 @@ Building.Attackable={
                 var myself=this;
                 var attackFrame=function(){
                     //If enemy already dead or becomes invisible or we just miss enemy
-                    if (enemy.status=="dead" || enemy.isInvisible || myself.isMissingTarget()) {
+                    if (enemy.status=="dead" || enemy['isInvisible'+myself.team] || (myself.isMissingTarget && myself.isMissingTarget())) {
                         myself.stopAttack();
                         myself.dock();
                     }
                     else {
                         //Cannot come in until reload cool down, only dock down can finish attack animation
-                        if (myself.isReloaded()) {
+                        if (myself.isReloaded && myself.isReloaded()) {
                             //Load bullet
                             myself.coolDown=false;
                             //Cool down after attack interval
-                            setTimeout(function(){
+                            Game.commandTimeout(function(){
                                 myself.coolDown=true;
                             },myself.get('attackInterval'));
                             //If AOE, init enemies
                             var enemies;
                             if (myself.AOE) {
                                 //Get possible targets
-                                if (myself.isEnemy) {
-                                    enemies=(myself.attackLimit)?((myself.attackLimit=="flying")?
-                                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings))
-                                        :(Unit.allOurUnits().concat(Building.ourBuildings));
-                                }
-                                else {
-                                    enemies=(myself.attackLimit)?((myself.attackLimit=="flying")?
-                                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings))
-                                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings));
+                                switch(myself.attackLimit){
+                                    case "flying":
+                                        enemies=Unit.allUnits.filter(function(chara){
+                                            return chara.team!=myself.team && chara.isFlying;
+                                        });
+                                        break;
+                                    case "ground":
+                                        var enemyUnits=Unit.allUnits.filter(function(chara){
+                                            return chara.team!=myself.team && !(chara.isFlying);
+                                        });
+                                        var enemyBuildings=Building.allBuildings.filter(function(chara){
+                                            return chara.team!=myself.team;
+                                        });
+                                        enemies=enemyUnits.concat(enemyBuildings);
+                                        break;
+                                    default:
+                                        enemies=(Unit.allUnits.concat(Building.allBuildings)).filter(function(chara){
+                                            return chara.team!=myself.team;
+                                        });
+                                        break;
                                 }
                                 //Range filter
                                 switch (myself.AOE.type) {
@@ -238,20 +263,22 @@ Building.Attackable={
                                             for (var n=1;n<=N;n++){
                                                 var X=myself.posX()+n*(enemy.posX()-myself.posX())/N;
                                                 var Y=myself.posY()+n*(enemy.posY()-myself.posY())/N;
-                                                if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:myself.AOE.radius}) && !chara.isInvisible) {
+                                                if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:myself.AOE.radius})
+                                                    && !chara['isInvisible'+myself.team]) {
                                                     return true;
                                                 }
                                             }
                                             return false;
                                         });
                                         break;
-                                    //Default type is CIRCLE
+                                    case "MULTIPLE":
                                     case "CIRCLE":
+                                    //Default type is CIRCLE
                                     default:
                                         enemies=enemies.filter(function(chara){
                                             return chara.insideCircle(
                                                 {centerX:enemy.posX(),centerY:enemy.posY(),radius:myself.AOE.radius})
-                                                && !chara.isInvisible;
+                                                && !chara['isInvisible'+myself.team];
                                         })
                                 }
                             }
@@ -261,7 +288,7 @@ Building.Attackable={
                                 //Change status to show attack frame
                                 myself.status="attack";
                                 //Will return to dock after attack
-                                setTimeout(function(){
+                                Game.commandTimeout(function(){
                                     //If still show attack
                                     if (myself.status=="attack") {
                                         myself.status="dock";
@@ -271,31 +298,47 @@ Building.Attackable={
                             }
                             //If has bullet
                             if (myself.Bullet) {
-                                //Will shoot multiple bullets in one time
-                                if (myself.continuousAttack) {
-                                    myself.bullet=new Array();
-                                    for (var N=0;N<myself.continuousAttack.count;N++){
-                                        var bullet=new myself.Bullet({
-                                            from:myself,
-                                            to:enemy
-                                        });
-                                        //Reassign bullets location
-                                        if (myself.continuousAttack.layout) myself.continuousAttack.layout(bullet,N);
-                                        if (myself.continuousAttack.onlyOnce && N!=0) {
-                                            bullet.noDamage=true;
+                                var fireBullet=function(){
+                                    //Will shoot multiple bullets in one time
+                                    if (myself.continuousAttack) {
+                                        myself.bullet=[];
+                                        for (var N=0;N<myself.continuousAttack.count;N++){
+                                            var bullet=new myself.Bullet({
+                                                from:myself,
+                                                to:enemy
+                                            });
+                                            //Reassign bullets location
+                                            if (myself.continuousAttack.layout) myself.continuousAttack.layout(bullet,N);
+                                            if (myself.continuousAttack.onlyOnce && N!=(myself.continuousAttack.count/2>>0)) {
+                                                bullet.noDamage=true;
+                                            }
+                                            bullet.fire();
+                                            myself.bullet.push(bullet);
                                         }
-                                        bullet.fire();
-                                        myself.bullet.push(bullet);
                                     }
-                                }
-                                else {
-                                    //Reload one new bullet
-                                    myself.bullet=new myself.Bullet({
-                                        from:myself,
-                                        to:enemy
-                                    });
-                                    myself.bullet.fire();
-                                }
+                                    else {
+                                        if (myself.AOE && myself.AOE.type=="MULTIPLE"){
+                                            for (var N=0;N<Math.min(myself.AOE.count,enemies.length);N++){
+                                                new myself.Bullet({
+                                                    from:myself,
+                                                    to:enemies[N]
+                                                }).fire();
+                                            }
+                                        }
+                                        else {
+                                            //Reload one new bullet
+                                            myself.bullet=new myself.Bullet({
+                                                from:myself,
+                                                to:enemy
+                                            });
+                                            myself.bullet.fire();
+                                        }
+                                    }
+                                };
+                                if (myself.fireDelay) Game.commandTimeout(function(){
+                                    fireBullet();
+                                },myself.fireDelay);
+                                else fireBullet();
                             }
                             //Else will cause damage immediately (melee attack)
                             else {
@@ -308,7 +351,7 @@ Building.Attackable={
                                 }
                                 else {
                                     //Cause damage after finish whole melee attack action
-                                    setTimeout(function(){
+                                    Game.commandTimeout(function(){
                                         enemy.getDamageBy(myself);
                                         enemy.reactionWhenAttackedBy(myself);
                                     },myself.frame.attack*100);
@@ -330,30 +373,25 @@ Building.Attackable={
                         }
                     }
                 };
-                attackFrame();//Add one missing frame
-                this.attackTimer=setInterval(attackFrame,100);
+                this.allFrames['attack']=attackFrame;
             }
         },
         stopAttack:AttackableUnit.prototype.stopAttack,
         findNearbyTargets:function(){
             //Initial
-            var units,buildings,results=[];
-            //Only ours
-            if (this.isEnemy) {
-                units=Unit.allOurUnits();
-                buildings=Building.ourBuildings;
-            }
-            //Only enemies
-            else {
-                units=Unit.allEnemyUnits();
-                buildings=Building.enemyBuildings;
-            }
             var myself=this;
+            var units=Unit.allUnits.filter(function(chara){
+                return chara.team!=myself.team;
+            });
+            var buildings=Building.allBuildings.filter(function(chara){
+                return chara.team!=myself.team;
+            });
+            var results=[];
+            var myX=myself.posX();
+            var myY=myself.posY();
             [units,buildings].forEach(function(charas){
-                var myX=myself.posX();
-                var myY=myself.posY();
                 charas=charas.filter(function(chara){
-                    return !chara.isInvisible && myself.isInAttackRange(chara) && myself.matchAttackLimit(chara);
+                    return !chara['isInvisible'+myself.team] && myself.isInAttackRange(chara) && myself.matchAttackLimit(chara);
                 }).sort(function(chara1,chara2){
                     var X1=chara1.posX(),Y1=chara1.posY(),X2=chara2.posX(),Y2=chara1.posY();
                     return (X1-myX)*(X1-myX)+(Y1-myY)*(Y1-myY)-(X2-myX)*(X2-myX)-(Y2-myY)*(Y2-myY);
@@ -430,10 +468,69 @@ Building.ZergBuilding.Hatchery=Building.ZergBuilding.extends({
             '2':{name:'SetRallyPoint'},
             '3':{name:'EvolveBurrow'},
             '7':{name:'Lair',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='SpawningPool';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='SpawningPool';
                 })
             }}
+        },
+        injuryOffsets:[{x:-18,y:12},{x:-12,y:-22},{x:18,y:12}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ],
+        buildZergBuilding:function(){
+            var target=Building.ZergBuilding[this.buildName];
+            var mutation=this.evolveTo({
+                type:eval('Building.'+target.prototype.evolves[0].step),
+                chain:true
+            });
+            mutation.buildName=this.buildName;
+            //Calculate duration
+            var duration=Resource.getCost(this.buildName).time;
+            //Cheat: Operation cwal
+            if (Cheat.cwal) duration=40;
+            //Processing flag on transfer
+            mutation.processing={
+                name:mutation.buildName,
+                startTime:Game.mainTick,//new Date().getTime()
+                time:duration
+            };
+            //Evolve chain
+            for (var N=1;N<target.prototype.evolves.length;N++){
+                (function(n){
+                    var evolveInfo=target.prototype.evolves[n];
+                    Game.commandTimeout(function(){
+                        if (mutation.status!='dead'){
+                            //Evolve
+                            var evolveTarget=(eval('Building.'+evolveInfo.step));
+                            //Step is constructor function
+                            if (evolveTarget){
+                                var old=mutation;
+                                mutation=mutation.evolveTo({
+                                    type:evolveTarget,
+                                    chain:true
+                                });
+                                mutation.processing=old.processing;
+                                mutation.buildName=old.buildName;
+                            }
+                            //Step is status string
+                            else {
+                                mutation.status=evolveInfo.step;
+                            }
+                        }
+                    },duration*100*evolveInfo.percent);
+                })(N);
+            }
+            //Final evolve
+            Game.commandTimeout(function(){
+                if (mutation.status!='dead'){
+                    //Evolve
+                    mutation.evolveTo({
+                        type:Building.ZergBuilding[mutation.buildName],
+                        burstArr:mutation.evolveEffect
+                    });
+                }
+            },duration*100);
         }
     }
 });
@@ -471,10 +568,17 @@ Building.ZergBuilding.Lair=Building.ZergBuilding.extends({
             '5':{name:'EvolveAntennas'},
             '6':{name:'EvolvePneumatizedCarapace'},
             '7':{name:'Hive',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='QueenNest';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='QueenNest';
                 })
             }}
+        },
+        injuryOffsets:[{x:-22,y:14},{x:-12,y:-22},{x:22,y:14}],
+        evolves: [
+            {step:'ZergBuilding.MutationM',percent:0}
+        ],
+        buildZergBuilding:function(){
+            Building.ZergBuilding.Hatchery.prototype.buildZergBuilding.call(this);
         }
     }
 });
@@ -511,7 +615,12 @@ Building.ZergBuilding.Hive=Building.ZergBuilding.extends({
             '4':{name:'EvolveVentralSacs'},
             '5':{name:'EvolveAntennas'},
             '6':{name:'EvolvePneumatizedCarapace'}
-        }
+        },
+        injuryOffsets:[{x:-26,y:16},{x:2,y:-32},{x:26,y:16}],
+        evolves: [
+            {step:'ZergBuilding.MutationM',percent:0},
+            {step:'ZergBuilding.MutationL',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.CreepColony=Building.ZergBuilding.extends({
@@ -539,21 +648,28 @@ Building.ZergBuilding.CreepColony=Building.ZergBuilding.extends({
         },
         items: {
             '7':{name:'SporeColony',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='EvolutionChamber';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='EvolutionChamber';
                 })
             }},
             '8':{name:'SunkenColony',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='SpawningPool';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='SpawningPool';
                 })
             }}
+        },
+        injuryOffsets:[{x:-14,y:8},{x:-4,y:-16},{x:20,y:8}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0}
+        ],
+        buildZergBuilding:function(){
+            Building.ZergBuilding.Hatchery.prototype.buildZergBuilding.call(this);
         }
     }
 });
 Building.ZergBuilding.SunkenColony=Building.ZergBuilding.extends(Building.Attackable).extends({
     constructorPlus:function(props){
-        this.sound.attack=new Audio('bgm/Colony.attack.wav');
+        this.sound.attack=new Audio(Game.CDN+'bgm/Colony.attack.wav');
     },
     prototypePlus: {
         //Add basic unit info
@@ -585,14 +701,18 @@ Building.ZergBuilding.SunkenColony=Building.ZergBuilding.extends(Building.Attack
         attackInterval:2200,
         attackLimit:"ground",
         attackEffect:Burst.Sunken,
-        attackType:AttackableUnit.BURST_ATTACK
+        attackType:AttackableUnit.BURST_ATTACK,
+        injuryOffsets:[{x:-14,y:8},{x:-4,y:-12},{x:20,y:8}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0}
+        ]
     }
 });
 Building.ZergBuilding.SporeColony=Building.ZergBuilding.extends(Building.Attackable).extends({
     constructorPlus:function(props){
         this.imgPos.attack=this.imgPos.dock;
         this.frame.attack=this.frame.dock;
-        this.sound.attack=new Audio('bgm/Colony.attack.wav');
+        this.sound.attack=new Audio(Game.CDN+'bgm/Colony.attack.wav');
     },
     prototypePlus: {
         //Add basic unit info
@@ -619,7 +739,11 @@ Building.ZergBuilding.SporeColony=Building.ZergBuilding.extends(Building.Attacka
         attackRange:245,
         attackInterval:1500,
         attackLimit:"flying",
-        attackType:AttackableUnit.NORMAL_ATTACK
+        attackType:AttackableUnit.NORMAL_ATTACK,
+        injuryOffsets:[{x:-14,y:8},{x:-12,y:-16},{x:14,y:8}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0}
+        ]
     }
 });
 Building.ZergBuilding.Extractor=Building.ZergBuilding.extends({
@@ -644,7 +768,11 @@ Building.ZergBuilding.Extractor=Building.ZergBuilding.extends({
         cost:{
             mine:50,
             time:400
-        }
+        },
+        injuryOffsets:[{x:-24,y:14},{x:-18,y:-16},{x:24,y:14}],
+        evolves: [
+            {step:'ZergBuilding.MutationL',percent:0}
+        ]
     }
 });
 Building.ZergBuilding.SpawningPool=Building.ZergBuilding.extends({
@@ -673,7 +801,12 @@ Building.ZergBuilding.SpawningPool=Building.ZergBuilding.extends({
         items: {
             '1':{name:'EvolveMetabolicBoost'},
             '2':{name:'EvolveAdrenalGlands'}
-        }
+        },
+        injuryOffsets:[{x:-15,y:10},{x:0,y:-18},{x:15,y:10}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.EvolutionChamber=Building.ZergBuilding.extends({
@@ -703,7 +836,12 @@ Building.ZergBuilding.EvolutionChamber=Building.ZergBuilding.extends({
             '1':{name:'UpgradeMeleeAttacks'},
             '2':{name:'UpgradeMissileAttacks'},
             '3':{name:'EvolveCarapace'}
-        }
+        },
+        injuryOffsets:[{x:-18,y:12},{x:0,y:-22},{x:18,y:12}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.HydraliskDen=Building.ZergBuilding.extends({
@@ -734,7 +872,12 @@ Building.ZergBuilding.HydraliskDen=Building.ZergBuilding.extends({
             '1':{name:'EvolveMuscularAugments'},
             '2':{name:'EvolveGroovedSpines'},
             '4':{name:'EvolveLurkerAspect'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:12},{x:0,y:-24},{x:20,y:12}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.Spire=Building.ZergBuilding.extends({
@@ -765,10 +908,18 @@ Building.ZergBuilding.Spire=Building.ZergBuilding.extends({
             '1':{name:'UpgradeFlyerAttacks'},
             '2':{name:'UpgradeFlyerCarapace'},
             '7':{name:'GreaterSpire',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='Hive';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Hive';
                 })
             }}
+        },
+        injuryOffsets:[{x:-20,y:18},{x:-12,y:-16},{x:20,y:18}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ],
+        buildZergBuilding:function(){
+            Building.ZergBuilding.Hatchery.prototype.buildZergBuilding.call(this);
         }
     }
 });
@@ -799,7 +950,11 @@ Building.ZergBuilding.GreaterSpire=Building.ZergBuilding.extends({
         items: {
             '1':{name:'UpgradeFlyerAttacks'},
             '2':{name:'UpgradeFlyerCarapace'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:22},{x:-12,y:-16},{x:20,y:22}],
+        evolves: [
+            {step:'ZergBuilding.MutationM',percent:0}
+        ]
     }
 });
 Building.ZergBuilding.QueenNest=Building.ZergBuilding.extends({
@@ -830,7 +985,12 @@ Building.ZergBuilding.QueenNest=Building.ZergBuilding.extends({
             '1':{name:'EvolveSpawnBroodling'},
             '2':{name:'EvolveEnsnare'},
             '3':{name:'EvolveGameteMeiosis'}
-        }
+        },
+        injuryOffsets:[{x:-16,y:10},{x:-12,y:-20},{x:16,y:10}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.NydusCanal=Building.ZergBuilding.extends({
@@ -858,7 +1018,12 @@ Building.ZergBuilding.NydusCanal=Building.ZergBuilding.extends({
         },
         items: {
             '1':{name:'NydusCanal'}
-        }
+        },
+        injuryOffsets:[{x:-14,y:14},{x:-18,y:-18},{x:14,y:14}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.UltraliskCavern=Building.ZergBuilding.extends({
@@ -888,7 +1053,12 @@ Building.ZergBuilding.UltraliskCavern=Building.ZergBuilding.extends({
         items: {
             '1':{name:'EvolveAnabolicSynthesis'},
             '2':{name:'EvolveChitinousPlating'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:12},{x:-12,y:-24},{x:20,y:12}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.DefilerMound=Building.ZergBuilding.extends({
@@ -919,7 +1089,12 @@ Building.ZergBuilding.DefilerMound=Building.ZergBuilding.extends({
             '1':{name:'EvolvePlague'},
             '2':{name:'EvolveConsume'},
             '3':{name:'EvolveMetasynapticNode'}
-        }
+        },
+        injuryOffsets:[{x:-18,y:12},{x:-12,y:-22},{x:18,y:12}],
+        evolves: [
+            {step:'ZergBuilding.MutationS',percent:0},
+            {step:'ZergBuilding.MutationM',percent:0.5}
+        ]
     }
 });
 Building.ZergBuilding.InfestedBase=Building.ZergBuilding.extends({
@@ -943,74 +1118,10 @@ Building.ZergBuilding.InfestedBase=Building.ZergBuilding.extends({
         },
         HP: 1500,
         items: {
-            '1':{name:'InfestedTerran'}
-        }
-    }
-});
-Building.ZergBuilding.Egg=Building.ZergBuilding.extends({
-    constructorPlus:function(props){
-        this.sound={
-            selected:new Audio('bgm/Egg.selected.wav'),
-            death:new Audio('bgm/Egg.death.wav')
-        };
-        //Hidden frames
-        this.action=13;
-    },
-    prototypePlus: {
-        //Add basic unit info
-        name: "Egg",
-        source: "Larva",
-        portrait: "Egg",
-        noMud:true,
-        imgPos: {
-            dock: {
-                left: [2,38,74,110,146,182,218,254,290,326,362,398,-1,2,38,74,110,-1,291,329,367,405,442,480],
-                top: [213,213,213,213,213,213,213,213,213,213,213,213,-1,173,173,173,173,-1,372,372,372,372,372,372]
-            }
+            '1':{name:'InfestedTerran'},
+            '6':{name:'SetRallyPoint'}
         },
-        width: 36,
-        height: 40,
-        frame: {
-            dock: 12
-        },
-        HP: 200,
-        armor: 10,
-        sight: 35,
-        dieEffect: Burst.EggDeath
-    }
-});
-Building.ZergBuilding.Cocoon=Building.ZergBuilding.extends({
-    constructorPlus:function(props){
-        this.sound={
-            selected:new Audio('bgm/Cocoon.selected.wav'),
-            death:new Audio('bgm/Mutalisk.death.wav')
-        };
-        //Override default flyingFlag for building
-        this.isFlying=true;
-        //Hidden frames
-        this.action=10;
-    },
-    prototypePlus: {
-        //Add basic unit info
-        name: "Cocoon",
-        source: "Larva",
-        portrait: "Cocoon",
-        noMud:true,
-        imgPos: {
-            dock: {
-                left: [0,63,126,189,252,315,378,441,504,-1,0,63,126,189,252,315],
-                top: [1105,1105,1105,1105,1105,1105,1105,1105,1105,-1,1060,1060,1060,1060,1060,1060]
-            }
-        },
-        width: 62,
-        height: 45,
-        frame: {
-            dock: 9
-        },
-        HP: 200,
-        armor: 10,
-        sight: 35,
-        dieEffect: Burst.SmallZergFlyingDeath
+        injuryOffsets:[{x:-22,y:14},{x:-6,y:-26},{x:22,y:14}]
     }
 });
 Building.ZergBuilding.OvermindI=Building.ZergBuilding.extends({
@@ -1031,7 +1142,8 @@ Building.ZergBuilding.OvermindI=Building.ZergBuilding.extends({
         frame: {
             dock: 1
         },
-        HP: 3000
+        HP: 3000,
+        injuryOffsets:[{x:-24,y:15},{x:-6,y:-30},{x:24,y:15}]
     }
 });
 Building.ZergBuilding.OvermindII=Building.ZergBuilding.extends({
@@ -1052,7 +1164,8 @@ Building.ZergBuilding.OvermindII=Building.ZergBuilding.extends({
         frame: {
             dock: 1
         },
-        HP: 3000
+        HP: 3000,
+        injuryOffsets:[{x:-28,y:18},{x:-6,y:-34},{x:28,y:18}]
     }
 });
 
@@ -1084,16 +1197,79 @@ Building.TerranBuilding.CommandCenter=Building.TerranBuilding.extends({
             '1':{name:'SCV'},
             '6':{name:'SetRallyPoint'},
             '7':{name:'ComstatStation',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='Academy';
+                return (!Game.selectedUnit.attachment || Game.selectedUnit.attachment.status=='dead') && Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Academy';
                 })
             }},
             '8':{name:'NuclearSilo',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ConvertOps';
+                return (!Game.selectedUnit.attachment || Game.selectedUnit.attachment.status=='dead') && Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='ConvertOps';
                 })
             }},
             '9':{name:'LiftOff'}
+        },
+        injuryOffsets:[{x:-35,y:-30},{x:-2,y:-15},{x:35,y:-15}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionL',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ],
+        buildTerranBuilding:function(){
+            var target=Building.TerranBuilding[this.buildName];
+            var construction=new (eval('Building.'+target.prototype.evolves[0].step))
+                ({x:this.x+this.width,y:this.y+this.height-target.prototype.height,team:this.team});
+            construction.buildName=this.buildName;
+            this.attachment=construction;
+            Button.reset();
+            //Calculate duration
+            var duration=Resource.getCost(this.buildName).time;
+            //Cheat: Operation cwal
+            if (Cheat.cwal) duration=40;
+            //Processing flag on transfer
+            construction.processing={
+                name:construction.buildName,
+                startTime:Game.mainTick,//new Date().getTime()
+                time:duration
+            };
+            var myself=this;
+            //Evolve chain
+            for (var N=1;N<target.prototype.evolves.length;N++){
+                (function(n){
+                    var evolveInfo=target.prototype.evolves[n];
+                    Game.commandTimeout(function(){
+                        if (construction.status!='dead'){
+                            //Evolve
+                            var evolveTarget=(eval('Building.'+evolveInfo.step));
+                            //Step is constructor function
+                            if (evolveTarget){
+                                var old=construction;
+                                construction=construction.evolveTo({
+                                    type:evolveTarget,
+                                    mixin:(evolveTarget.prototype.name=='ConstructionSkeleton')?{type:construction.buildName}:null,
+                                    chain:true
+                                });
+                                construction.processing=old.processing;
+                                construction.buildName=old.buildName;
+                                myself.attachment=construction;
+                            }
+                            //Step is status string
+                            else {
+                                construction.status=evolveInfo.step;
+                            }
+                        }
+                    },duration*100*evolveInfo.percent);
+                })(N);
+            }
+            //Final evolve
+            Game.commandTimeout(function(){
+                if (construction.status!='dead'){
+                    //Evolve
+                    myself.attachment=construction.evolveTo({
+                        type:Building.TerranBuilding[construction.buildName]
+                    });
+                }
+            },duration*100);
         }
     }
 });
@@ -1120,7 +1296,15 @@ Building.TerranBuilding.SupplyDepot=Building.TerranBuilding.extends({
         cost:{
             mine:100,
             time:400
-        }
+        },
+        injuryOffsets:[{x:-20,y:-25},{x:0,y:-10},{x:25,y:-10}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.Refinery=Building.TerranBuilding.extends({
@@ -1145,7 +1329,13 @@ Building.TerranBuilding.Refinery=Building.TerranBuilding.extends({
         cost:{
             mine:100,
             time:400
-        }
+        },
+        injuryOffsets:[{x:-26,y:-36},{x:0,y:10},{x:38,y:5}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionR',percent:0},
+            {step:'step2',percent:0.3},
+            {step:'TerranBuilding.ConstructionF',percent:0.7}
+        ]
     }
 });
 Building.TerranBuilding.Barracks=Building.TerranBuilding.extends({
@@ -1174,25 +1364,32 @@ Building.TerranBuilding.Barracks=Building.TerranBuilding.extends({
         items: {
             '1':{name:'Marine'},
             '2':{name:'Firebat',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='Academy';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Academy';
                 })
             }},
             '3':{name:'Ghost',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ScienceFacility';
-                }) && Building.ourBuildings.some(function(chara){
-                    return chara.name=='ConvertOps';
-                })
+                //Has ScienceFacility with attachment ConvertOps
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='ScienceFacility'
+                        && (chara.attachment && chara.attachment.status!='dead' && chara.attachment.name=='ConvertOps');
+                });
             }},
             '4':{name:'Medic',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='Academy';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Academy';
                 })
             }},
             '6':{name:'SetRallyPoint'},
             '9':{name:'LiftOff'}
-        }
+        },
+        injuryOffsets:[{x:-25,y:-40},{x:35,y:0},{x:5,y:-5}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionL',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.EngineeringBay=Building.TerranBuilding.extends({
@@ -1221,14 +1418,21 @@ Building.TerranBuilding.EngineeringBay=Building.TerranBuilding.extends({
         items: {
             '1':{name:'UpgradeInfantryWeapons'},
             '2':{name:'UpgradeInfantryArmors'}
-        }
+        },
+        injuryOffsets:[{x:-25,y:-40},{x:25,y:-10},{x:15,y:-50}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.MissileTurret=Building.TerranBuilding.extends(Building.Attackable).extends({
     constructorPlus:function(props){
         this.imgPos.attack=this.imgPos.dock;
         this.frame.attack=this.frame.dock;
-        this.sound.attack=new Audio('bgm/Wraith.attackF.wav');
+        this.sound.attack=new Audio(Game.CDN+'bgm/Wraith.attackF.wav');
     },
     prototypePlus: {
         //Add basic unit info
@@ -1257,7 +1461,13 @@ Building.TerranBuilding.MissileTurret=Building.TerranBuilding.extends(Building.A
         attackRange: 245,
         attackInterval:1500,
         attackLimit:"flying",
-        attackType:AttackableUnit.BURST_ATTACK
+        attackType:AttackableUnit.BURST_ATTACK,
+        injuryOffsets:[{x:-10,y:-15},{x:10,y:-10},{x:0,y:12}],
+        injuryScale:0.6,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'TerranBuilding.ConstructionF',percent:0.5}
+        ]
     }
 });
 Building.TerranBuilding.Academy=Building.TerranBuilding.extends({
@@ -1289,7 +1499,14 @@ Building.TerranBuilding.Academy=Building.TerranBuilding.extends({
             '4':{name:'ResearchRestoration'},
             '5':{name:'ResearchOpticalFlare'},
             '6':{name:'ResearchCaduceusReactor'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:-28},{x:26,y:-46},{x:16,y:12}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.Bunker=Building.TerranBuilding.extends({
@@ -1317,7 +1534,15 @@ Building.TerranBuilding.Bunker=Building.TerranBuilding.extends({
         },
         items: {
             '8':{name:'Load'}
-        }
+        },
+        injuryOffsets:[{x:4,y:-24},{x:-26,y:-18},{x:20,y:-2}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.Factory=Building.TerranBuilding.extends({
@@ -1347,18 +1572,29 @@ Building.TerranBuilding.Factory=Building.TerranBuilding.extends({
         items: {
             '1':{name:'Vulture'},
             '2':{name:'Tank',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='MachineShop';
-                })
+                var attach=Game.selectedUnit.attachment;
+                return (attach && attach.status!='dead' && attach.name=='MachineShop');
             }},
             '3':{name:'Goliath',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='Armory';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Armory';
                 })
             }},
             '6':{name:'SetRallyPoint'},
-            '7':{name:'MachineShop'},
+            '7':{name:'MachineShop',condition:function(){
+                return (!Game.selectedUnit.attachment || Game.selectedUnit.attachment.status=='dead');
+            }},
             '9':{name:'LiftOff'}
+        },
+        injuryOffsets:[{x:-32,y:-38},{x:45,y:-26},{x:10,y:-32}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ],
+        buildTerranBuilding:function(){
+            Building.TerranBuilding.CommandCenter.prototype.buildTerranBuilding.call(this);
         }
     }
 });
@@ -1389,36 +1625,49 @@ Building.TerranBuilding.Starport=Building.TerranBuilding.extends({
         items: {
             '1':{name:'Wraith'},
             '2':{name:'Dropship',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ControlTower';
-                })
+                var attach=Game.selectedUnit.attachment;
+                return (attach && attach.status!='dead' && attach.name=='ControlTower');
             }},
             '3':{name:'Vessel',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ControlTower';
-                }) && Building.ourBuildings.some(function(chara){
-                    return chara.name=='ScienceFacility';
+                var attach=Game.selectedUnit.attachment;
+                //Has attachment ControlTower, and has ScienceFacility
+                return (attach && attach.status!='dead' && attach.name=='ControlTower')
+                    && Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='ScienceFacility';
                 })
             }},
             '4':{name:'BattleCruiser',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ControlTower';
-                }) && Building.ourBuildings.some(function(chara){
-                    return chara.name=='ScienceFacility';
-                }) && Building.ourBuildings.some(function(chara){
-                    return chara.name=='PhysicsLab';
-                })
+                var attach=Game.selectedUnit.attachment;
+                //Has attachment ControlTower, and has ScienceFacility with attachment PhysicsLab
+                return (attach && attach.status!='dead' && attach.name=='ControlTower')
+                    && Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='ScienceFacility'
+                        && (chara.attachment && chara.attachment.status!='dead' && chara.attachment.name=='PhysicsLab');
+                    });
             }},
             '5':{name:'Valkyrie',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ControlTower';
-                }) && Building.ourBuildings.some(function(chara){
-                    return chara.name=='Armory';
+                var attach=Game.selectedUnit.attachment;
+                //Has attachment ControlTower, and has Armory
+                return (attach && attach.status!='dead' && attach.name=='ControlTower')
+                    && Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Armory';
                 })
             }},
             '6':{name:'SetRallyPoint'},
-            '7':{name:'ControlTower'},
+            '7':{name:'ControlTower',condition:function(){
+                return (!Game.selectedUnit.attachment || Game.selectedUnit.attachment.status=='dead');
+            }},
             '9':{name:'LiftOff'}
+        },
+        injuryOffsets:[{x:-32,y:-10},{x:0,y:-10},{x:24,y:-35}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionL',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ],
+        buildTerranBuilding:function(){
+            Building.TerranBuilding.CommandCenter.prototype.buildTerranBuilding.call(this);
         }
     }
 });
@@ -1450,9 +1699,23 @@ Building.TerranBuilding.ScienceFacility=Building.TerranBuilding.extends({
             '1':{name:'ResearchEMPShockwaves'},
             '2':{name:'ResearchIrradiate'},
             '3':{name:'ResearchTitanReactor'},
-            '7':{name:'PhysicsLab'},
-            '8':{name:'ConvertOps'},
+            '7':{name:'ConvertOps',condition:function(){
+                return (!Game.selectedUnit.attachment || Game.selectedUnit.attachment.status=='dead');
+            }},
+            '8':{name:'PhysicsLab',condition:function(){
+                return (!Game.selectedUnit.attachment || Game.selectedUnit.attachment.status=='dead');
+            }},
             '9':{name:'LiftOff'}
+        },
+        injuryOffsets:[{x:-28,y:-40},{x:28,y:-32},{x:-20,y:5}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ],
+        buildTerranBuilding:function(){
+            Building.TerranBuilding.CommandCenter.prototype.buildTerranBuilding.call(this);
         }
     }
 });
@@ -1485,7 +1748,14 @@ Building.TerranBuilding.Armory=Building.TerranBuilding.extends({
             '2':{name:'UpgradeShipWeapons'},
             '4':{name:'UpgradeVehicleArmors'},
             '5':{name:'UpgradeShipArmors'}
-        }
+        },
+        injuryOffsets:[{x:-30,y:12},{x:-8,y:-22},{x:20,y:-12}],
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.ComstatStation=Building.TerranBuilding.extends({
@@ -1515,7 +1785,15 @@ Building.TerranBuilding.ComstatStation=Building.TerranBuilding.extends({
         },
         items:{
             '1':{name:'ScannerSweep'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-26},{x:16,y:0},{x:16,y:-20}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.NuclearSilo=Building.TerranBuilding.extends({
@@ -1544,7 +1822,15 @@ Building.TerranBuilding.NuclearSilo=Building.TerranBuilding.extends({
         },
         items:{
             '1':{name:'ArmNuclearSilo'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-26},{x:16,y:0},{x:16,y:-20}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.MachineShop=Building.TerranBuilding.extends({
@@ -1576,7 +1862,15 @@ Building.TerranBuilding.MachineShop=Building.TerranBuilding.extends({
             '2':{name:'ResearchSpiderMines'},
             '3':{name:'ResearchSiegeTech'},
             '4':{name:'ResearchCharonBoosters'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-26},{x:16,y:0},{x:16,y:-20}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.ControlTower=Building.TerranBuilding.extends({
@@ -1606,7 +1900,15 @@ Building.TerranBuilding.ControlTower=Building.TerranBuilding.extends({
         items: {
             '1':{name:'ResearchCloakingField'},
             '2':{name:'ResearchApolloReactor'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-26},{x:16,y:0},{x:16,y:-20}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionM',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.PhysicsLab=Building.TerranBuilding.extends({
@@ -1636,7 +1938,15 @@ Building.TerranBuilding.PhysicsLab=Building.TerranBuilding.extends({
         items: {
             '1':{name:'ResearchYamatoGun'},
             '2':{name:'ResearchColossusReactor'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-26},{x:16,y:0},{x:16,y:-20}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.ConvertOps=Building.TerranBuilding.extends({
@@ -1668,7 +1978,15 @@ Building.TerranBuilding.ConvertOps=Building.TerranBuilding.extends({
             '2':{name:'ResearchPersonalCloaking'},
             '4':{name:'ResearchOcularImplants'},
             '5':{name:'ResearchMoebiusReactor'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-26},{x:16,y:0},{x:16,y:-20}],
+        injuryScale:0.8,
+        evolves: [
+            {step:'TerranBuilding.ConstructionS',percent:0},
+            {step:'step2',percent:0.25},
+            {step:'step3',percent:0.5},
+            {step:'TerranBuilding.ConstructionF',percent:0.75}
+        ]
     }
 });
 Building.TerranBuilding.CrashCruiser=Building.TerranBuilding.extends({
@@ -1689,7 +2007,8 @@ Building.TerranBuilding.CrashCruiser=Building.TerranBuilding.extends({
         frame: {
             dock: 1
         },
-        HP: 250
+        HP: 250,
+        injuryOffsets:[{x:-8,y:-38},{x:24,y:-20},{x:-22,y:6}]
     }
 });
 Building.TerranBuilding.BigCannon=Building.TerranBuilding.extends({
@@ -1710,7 +2029,8 @@ Building.TerranBuilding.BigCannon=Building.TerranBuilding.extends({
         frame: {
             dock: 1
         },
-        HP: 500
+        HP: 500,
+        injuryOffsets:[{x:-10,y:-40},{x:42,y:-30},{x:8,y:26}]
     }
 });
 
@@ -1742,7 +2062,8 @@ Building.ProtossBuilding.Nexus=Building.ProtossBuilding.extends({
         items: {
             '1':{name:'Probe'},
             '6':{name:'SetRallyPoint'}
-        }
+        },
+        injuryOffsets:[{x:-10,y:-30},{x:0,y:36},{x:38,y:30}]
     }
 });
 Building.ProtossBuilding.Pylon=Building.ProtossBuilding.extends({
@@ -1769,7 +2090,9 @@ Building.ProtossBuilding.Pylon=Building.ProtossBuilding.extends({
         cost:{
             mine:100,
             time:300
-        }
+        },
+        injuryOffsets:[{x:8,y:6},{x:0,y:-16},{x:0,y:0}],
+        injuryScale:0.8
     }
 });
 Building.ProtossBuilding.Assimilator=Building.ProtossBuilding.extends({
@@ -1795,7 +2118,8 @@ Building.ProtossBuilding.Assimilator=Building.ProtossBuilding.extends({
         cost:{
             mine:100,
             time:400
-        }
+        },
+        injuryOffsets:[{x:-18,y:-38},{x:40,y:-26},{x:20,y:-38}]
     }
 });
 Building.ProtossBuilding.Gateway=Building.ProtossBuilding.extends({
@@ -1825,22 +2149,23 @@ Building.ProtossBuilding.Gateway=Building.ProtossBuilding.extends({
         items: {
             '1':{name:'Zealot'},
             '2':{name:'Dragoon',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='CyberneticsCore';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='CyberneticsCore';
                 })
             }},
             '3':{name:'Templar',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='TemplarArchives';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='TemplarArchives';
                 })
             }},
             '4':{name:'DarkTemplar',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='TemplarArchives';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='TemplarArchives';
                 })
             }},
             '6':{name:'SetRallyPoint'}
-        }
+        },
+        injuryOffsets:[{x:0,y:-54},{x:-42,y:-24},{x:36,y:16}]
     }
 });
 Building.ProtossBuilding.Forge=Building.ProtossBuilding.extends({
@@ -1871,13 +2196,14 @@ Building.ProtossBuilding.Forge=Building.ProtossBuilding.extends({
             '1':{name:'UpgradeGroundWeapons'},
             '2':{name:'UpgradeGroundArmor'},
             '3':{name:'UpgradePlasmaShields'}
-        }
+        },
+        injuryOffsets:[{x:23,y:-47},{x:-23,y:-4},{x:25,y:1}]
     }
 });
 Building.ProtossBuilding.PhotonCannon=Building.ProtossBuilding.extends(Building.Attackable).extends({
     constructorPlus:function(props){
         this.imgPos.attack=this.imgPos.dock;
-        this.sound.attack=new Audio('bgm/Dragoon.attack.wav');
+        this.sound.attack=new Audio(Game.CDN+'bgm/Dragoon.attack.wav');
     },
     prototypePlus: {
         //Add basic unit info
@@ -1906,7 +2232,9 @@ Building.ProtossBuilding.PhotonCannon=Building.ProtossBuilding.extends(Building.
         attackRange: 245,
         attackInterval:2200,
         attackType:AttackableUnit.NORMAL_ATTACK,
-        fireDelay:400
+        fireDelay:400,
+        injuryOffsets:[{x:-12,y:-18},{x:12,y:0},{x:12,y:-20}],
+        injuryScale:0.8
     }
 });
 Building.ProtossBuilding.CyberneticsCore=Building.ProtossBuilding.extends({
@@ -1937,7 +2265,8 @@ Building.ProtossBuilding.CyberneticsCore=Building.ProtossBuilding.extends({
             '1':{name:'UpgradeAirWeapons'},
             '2':{name:'UpgradeAirArmor'},
             '3':{name:'DevelopSingularityCharge'}
-        }
+        },
+        injuryOffsets:[{x:-8,y:-36},{x:28,y:10},{x:-18,y:4}]
     }
 });
 Building.ProtossBuilding.ShieldBattery=Building.ProtossBuilding.extends({
@@ -1967,7 +2296,9 @@ Building.ProtossBuilding.ShieldBattery=Building.ProtossBuilding.extends({
         },
         items:{
             '1':{name:'RechargeShields'}
-        }
+        },
+        injuryOffsets:[{x:-12,y:-32},{x:0,y:-20},{x:12,y:-8}],
+        injuryScale:0.8
     }
 });
 Building.ProtossBuilding.RoboticsFacility=Building.ProtossBuilding.extends({
@@ -1998,17 +2329,18 @@ Building.ProtossBuilding.RoboticsFacility=Building.ProtossBuilding.extends({
         items: {
             '1':{name:'Shuttle'},
             '2':{name:'Reaver',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='RoboticsSupportBay';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='RoboticsSupportBay';
                 })
             }},
             '3':{name:'Observer',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='Observatory';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='Observatory';
                 })
             }},
             '6':{name:'SetRallyPoint'}
-        }
+        },
+        injuryOffsets:[{x:-18,y:-25},{x:12,y:10},{x:18,y:-15}]
     }
 });
 Building.ProtossBuilding.StarGate=Building.ProtossBuilding.extends({
@@ -2039,18 +2371,19 @@ Building.ProtossBuilding.StarGate=Building.ProtossBuilding.extends({
         items: {
             '1':{name:'Scout'},
             '2':{name:'Carrier',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='FleetBeacon';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='FleetBeacon';
                 })
             }},
             '3':{name:'Arbiter',condition:function(){
-                return Building.ourBuildings.some(function(chara){
-                    return chara.name=='ArbiterTribunal';
+                return Building.allBuildings.some(function(chara){
+                    return !(chara.isEnemy()) && chara.name=='ArbiterTribunal';
                 })
             }},
             '4':{name:'Corsair'},
             '6':{name:'SetRallyPoint'}
-        }
+        },
+        injuryOffsets:[{x:10,y:-65},{x:35,y:12},{x:-20,y:-42}]
     }
 });
 Building.ProtossBuilding.CitadelOfAdun=Building.ProtossBuilding.extends({
@@ -2080,7 +2413,8 @@ Building.ProtossBuilding.CitadelOfAdun=Building.ProtossBuilding.extends({
         },
         items: {
             '1':{name:'DevelopLegEnhancements'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:-30},{x:28,y:-40},{x:25,y:-8}]
     }
 });
 Building.ProtossBuilding.RoboticsSupportBay=Building.ProtossBuilding.extends({
@@ -2112,7 +2446,9 @@ Building.ProtossBuilding.RoboticsSupportBay=Building.ProtossBuilding.extends({
             '1':{name:'UpgradeScarabDamage'},
             '2':{name:'IncreaseReaverCapacity'},
             '3':{name:'DevelopGraviticDrive'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:-5},{x:5,y:10},{x:25,y:-5}],
+        injuryScale:0.8
     }
 });
 Building.ProtossBuilding.FleetBeacon=Building.ProtossBuilding.extends({
@@ -2146,7 +2482,8 @@ Building.ProtossBuilding.FleetBeacon=Building.ProtossBuilding.extends({
             '3':{name:'IncreaseCarrierCapacity'},
             '4':{name:'DevelopDistruptionWeb'},
             '5':{name:'DevelopArgusJewel'}
-        }
+        },
+        injuryOffsets:[{x:0,y:-55},{x:38,y:-42},{x:-26,y:-4}]
     }
 });
 Building.ProtossBuilding.TemplarArchives=Building.ProtossBuilding.extends({
@@ -2181,7 +2518,8 @@ Building.ProtossBuilding.TemplarArchives=Building.ProtossBuilding.extends({
             '4':{name:'DevelopMindControl'},
             '5':{name:'DevelopMaelStorm'},
             '6':{name:'DevelopArgusTalisman'}
-        }
+        },
+        injuryOffsets:[{x:-18,y:-28},{x:42,y:18},{x:14,y:10}]
     }
 });
 Building.ProtossBuilding.Observatory=Building.ProtossBuilding.extends({
@@ -2212,7 +2550,8 @@ Building.ProtossBuilding.Observatory=Building.ProtossBuilding.extends({
         items: {
             '1':{name:'DevelopGraviticBooster'},
             '2':{name:'DevelopSensorArray'}
-        }
+        },
+        injuryOffsets:[{x:32,y:-33},{x:-12,y:-26},{x:-16,y:10}]
     }
 });
 Building.ProtossBuilding.ArbiterTribunal=Building.ProtossBuilding.extends({
@@ -2244,7 +2583,9 @@ Building.ProtossBuilding.ArbiterTribunal=Building.ProtossBuilding.extends({
             '1':{name:'DevelopRecall'},
             '2':{name:'DevelopStasisField'},
             '3':{name:'DevelopKhaydarinCore'}
-        }
+        },
+        injuryOffsets:[{x:-20,y:0},{x:5,y:-20},{x:28,y:8}],
+        injuryScale:0.8
     }
 });
 Building.ProtossBuilding.TeleportGate=Building.ProtossBuilding.extends({
@@ -2266,7 +2607,8 @@ Building.ProtossBuilding.TeleportGate=Building.ProtossBuilding.extends({
             dock: 1
         },
         HP: 500,
-        SP: 500
+        SP: 500,
+        injuryOffsets:[{x:-14,y:30},{x:5,y:-16},{x:30,y:30}]
     }
 });
 Building.ProtossBuilding.Pyramid=Building.ProtossBuilding.extends({
@@ -2288,7 +2630,8 @@ Building.ProtossBuilding.Pyramid=Building.ProtossBuilding.extends({
             dock: 1
         },
         HP: 1500,
-        SP: 1500
+        SP: 1500,
+        injuryOffsets:[{x:-20,y:15},{x:5,y:-5},{x:28,y:23}]
     }
 });
 Building.ProtossBuilding.TeleportPoint=Building.ProtossBuilding.extends({
@@ -2310,15 +2653,17 @@ Building.ProtossBuilding.TeleportPoint=Building.ProtossBuilding.extends({
             dock: 1
         },
         HP: 100,
-        SP: 100
+        SP: 100,
+        injuryOffsets:[{x:-20,y:-10},{x:5,y:-30},{x:28,y:-2}],
+        injuryScale:0.8
     }
 });
 //Evolve related
 Building.ZergBuilding.Egg=Building.ZergBuilding.extends({
     constructorPlus:function(props){
         this.sound={
-            selected:new Audio('bgm/Egg.selected.wav'),
-            death:new Audio('bgm/Egg.death.wav')
+            selected:new Audio(Game.CDN+'bgm/Egg.selected.wav'),
+            death:new Audio(Game.CDN+'bgm/Egg.death.wav')
         };
         //Hidden frames
         this.action=13;
@@ -2349,8 +2694,8 @@ Building.ZergBuilding.Egg=Building.ZergBuilding.extends({
 Building.ZergBuilding.Cocoon=Building.ZergBuilding.extends({
     constructorPlus:function(props){
         this.sound={
-            selected:new Audio('bgm/Cocoon.selected.wav'),
-            death:new Audio('bgm/Mutalisk.death.wav')
+            selected:new Audio(Game.CDN+'bgm/Cocoon.selected.wav'),
+            death:new Audio(Game.CDN+'bgm/Mutalisk.death.wav')
         };
         //Override default flyingFlag for building
         this.isFlying=true;
@@ -2401,7 +2746,8 @@ Building.ZergBuilding.MutationS=Building.ZergBuilding.extends({
         },
         HP: 200,
         armor: 0,
-        sight: 350
+        sight: 350,
+        evolveEffect: ['SmallMutationComplete']
     }
 });
 Building.ZergBuilding.MutationM=Building.ZergBuilding.extends({
@@ -2424,7 +2770,8 @@ Building.ZergBuilding.MutationM=Building.ZergBuilding.extends({
         },
         HP: 400,
         armor: 0,
-        sight: 350
+        sight: 350,
+        evolveEffect: ['MiddleMutationComplete']
     }
 });
 Building.ZergBuilding.MutationL=Building.ZergBuilding.extends({
@@ -2447,7 +2794,8 @@ Building.ZergBuilding.MutationL=Building.ZergBuilding.extends({
         },
         HP: 600,
         armor: 0,
-        sight: 350
+        sight: 350,
+        evolveEffect: ['LargeMutationComplete']
     }
 });
 Building.TerranBuilding.ConstructionS=Building.TerranBuilding.extends({
@@ -2552,7 +2900,137 @@ Building.TerranBuilding.ConstructionL=Building.TerranBuilding.extends({
         sight: 350
     }
 });
-Building.ProtossBuilding.Archon=Building.ProtossBuilding.extends({
+Building.TerranBuilding.ConstructionR=Building.TerranBuilding.extends({
+    constructorPlus:function(props){
+        this.imgPos.dock=this.imgPos.step1;
+    },
+    prototypePlus: {
+        //Add basic unit info
+        name: "Construction",
+        imgPos: {
+            step1: {
+                left: 848,
+                top: 366
+            },
+            step2: {
+                left: 956,
+                top: 366
+            }
+        },
+        width: 108,
+        height: 70,
+        frame: {
+            step1: 1,
+            step2: 1,
+            dock: 1
+        },
+        HP: 400,
+        armor: 0,
+        sight: 350
+    }
+});
+Building.TerranBuilding.ConstructionF=Building.TerranBuilding.extends({
+    constructorPlus:function(props){
+        this.type=props.type;
+        //Override imgPos
+        this.imgPos=_$.clone(this.imgPos);
+        this.imgPos.dock=this.imgPos[this.type];
+        this.width=Building.TerranBuilding[this.type].prototype.width;
+        this.height=Building.TerranBuilding[this.type].prototype.height;
+        //Continue adjusting position after initialize
+        if (props.target instanceof Gobj){
+            this.x-=(this.width/2);
+            this.y-=(this.height/2);
+        }
+    },
+    prototypePlus: {
+        //Add basic unit info
+        name: "ConstructionSkeleton",
+        imgPos: {
+            CommandCenter: {
+                left: 674,
+                top: 440
+            },
+            SupplyDepot: {
+                left: 1034,
+                top: 118
+            },
+            Refinery: {
+                left: 950,
+                top: 434
+            },
+            Barracks: {
+                left: 812,
+                top: 432
+            },
+            EngineeringBay: {
+                left: 772,
+                top: 542
+            },
+            MissileTurret: {
+                left: 877,
+                top: 118
+            },
+            Academy: {
+                left: 1042,
+                top: 536
+            },
+            Bunker: {
+                left: 930,
+                top: 123
+            },
+            Factory: {
+                left: 917,
+                top: 530
+            },
+            Starport: {
+                left: 782,
+                top: 635
+            },
+            ScienceFacility: {
+                left: 907,
+                top: 641
+            },
+            Armory: {
+                left: 1027,
+                top: 634
+            },
+            ComstatStation: {
+                left: 426,
+                top: 122
+            },
+            NuclearSilo: {
+                left: 576,
+                top: 120
+            },
+            MachineShop: {
+                left: 724,
+                top: 114
+            },
+            ControlTower: {
+                left: 648,
+                top: 118
+            },
+            PhysicsLab: {
+                left: 504,
+                top: 116
+            },
+            ConvertOps: {
+                left: 797,
+                top: 122
+            }
+        },
+        width: 0,
+        height: 0,
+        frame: {
+            dock: 1
+        },
+        HP: 400,
+        armor: 0,
+        sight: 350
+    }
+});
+Building.ProtossBuilding.ArchonEvolve=Building.ProtossBuilding.extends({
     constructorPlus:function(props){
         //Hidden frames
         this.action=7;
@@ -2581,7 +3059,7 @@ Building.ProtossBuilding.Archon=Building.ProtossBuilding.extends({
         dieEffect: Burst.BigBlueExplode
     }
 });
-Building.ProtossBuilding.DarkArchon=Building.ProtossBuilding.extends({
+Building.ProtossBuilding.DarkArchonEvolve=Building.ProtossBuilding.extends({
     constructorPlus:function(props){
         //Hidden frames
         this.action=7;
@@ -2610,14 +3088,14 @@ Building.ProtossBuilding.DarkArchon=Building.ProtossBuilding.extends({
         dieEffect: Burst.BigBlueExplode
     }
 });
-Building.ProtossBuilding.Tranfer=Building.ProtossBuilding.extends({
+Building.ProtossBuilding.WrapRift=Building.ProtossBuilding.extends({
     constructorPlus:function(props){
         //Hidden frames
         this.action=7;
     },
     prototypePlus: {
         //Add basic unit info
-        name: "Tranfer",
+        name: "WrapRift",
         imgPos: {
             dock: {
                 left: [10,74,150,234,328,418,-1,10,74,150,234,328,418],

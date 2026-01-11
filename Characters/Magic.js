@@ -8,46 +8,48 @@ var Magic={
             if (this.stopAttack) this.stopAttack();
             this.status="burrow";
             this.action=2;
+            var myself=this;
             //Effect:Freeze target
             var bufferObj={
                 moveTo:function(){},
                 moveToward:function(){},
-                dock:function(){}
+                dock:function(){},
+                items:{'1':undefined,'2':undefined,'3':undefined,'4':undefined,'5':undefined,
+                    '6':undefined,'7':undefined,'8':undefined,'9':{name:'Unburrow'}}
             };
             if (this.attack) bufferObj.attack=function(){};
             //Lurker has same behavior as attackable building
             if (this.name=="Lurker") {
                 var mixin=$.extend({},Building.Attackable.prototypePlus);
                 delete mixin.name;
-                delete mixin.die;
+                mixin.die=AttackableUnit.prototype.die;//Override
                 $.extend(bufferObj,mixin);
+                delete bufferObj.items[3];//Enable attack icon
             }
             //Freeze immediately
             this.addBuffer(bufferObj,(this.name=="Lurker"));//onAll for Lurker
             this.burrowBuffer=[bufferObj];
             //Sound effect
             if (this.insideScreen()) this.sound.burrow.play();
-            //Forbid actions
+            //Forbid actions when burrowing
             var itemsBackup=this.items;
             this.items={'1':undefined,'2':undefined,'3':undefined,'4':undefined,'5':undefined,
                 '6':undefined,'7':undefined,'8':undefined,'9':undefined};
-            Button.reset();
+            if (Game.selectedUnit==this) Button.refreshButtons();
             //Finish burrow
-            var myself=this;
-            setTimeout(function(){
+            Game.commandTimeout(function(){
                 //Invisible when finish burrow
-                var bufferObjII={isInvisible:true};
+                var bufferObjII={};
+                for (var N=0;N<Game.playerNum;N++){
+                    bufferObjII['isInvisible'+N]=true;
+                }
                 myself.addBuffer(bufferObjII);
                 myself.burrowBuffer.push(bufferObjII);
                 myself.buffer.Burrow=true;
                 //Change icon when finish burrow
-                var items=_$.clone(itemsBackup);
-                for (var N in items){
-                    if (items[N] && items[N].name=="Burrow") items[N].name="Unburrow";
-                }
-                myself.items=items;
+                myself.items=itemsBackup;
                 //Apply callback
-                Button.reset();
+                if (Game.selectedUnit==myself) Button.refreshButtons();
             },this.imgPos.burrow.left[0].length*100-200);
         }
     },
@@ -64,34 +66,147 @@ var Magic={
             //Forbid actions
             this.items={'1':undefined,'2':undefined,'3':undefined,'4':undefined,'5':undefined,
                 '6':undefined,'7':undefined,'8':undefined,'9':undefined};
-            Button.reset();
+            if (Game.selectedUnit==this) Button.refreshButtons();
             //Finish unburrow
             var myself=this;
             delete myself.buffer.Burrow;//Restore shadow immediately
-            setTimeout(function(){
+            Game.commandTimeout(function(){
                 if (myself.burrowBuffer) {
                     //Release freeze
                     if (myself.removeBuffer(myself.burrowBuffer.pop())) {
                         delete myself.burrowBuffer;
+                        if (Game.selectedUnit==myself) Button.refreshButtons();
                     }
                 }
-                //Recover icons and apply callbacks
-                delete myself.items;
-                Button.reset();
                 myself.dock();
-                myself.direction=(myself.name=="Hydralisk" || myself.name=="Lurker")?2:3;
+                myself.direction=(myself.name=="Hydralisk" || myself.name=="Lurker")?5:6;
             },this.frame.unburrow*100-200);//margin
         }
     },
     Load:{
         name:"Load",
         enabled:false,
-        spell:function(location){}
+        needLocation:true,
+        spell:function(location){
+            //Has location callback info or nothing
+            if (location){
+                //Load our unit on ground
+                var target=Game.getSelectedOne(location.x,location.y,this.team,true,false);
+                var loadedMan=this.loadedUnits.reduce(function(man,chara){
+                    if (chara.cost && chara.cost.man) man+=(chara.cost.man);
+                    return man;
+                },0);
+                if (target instanceof Gobj){
+                    var targetMan=(target.cost && target.cost.man)?target.cost.man:0;
+                    //Load limit
+                    if ((loadedMan+targetMan)<=12){
+                        var myself=this;
+                        this.targetLock=true;
+                        //Move toward target to load it
+                        this.moveToward(target,Unit.meleeRange,function(){
+                            if (target.status!='dead'){
+                                //Order ours not to attack it anymore
+                                Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
+                                    if (chara.target==target) chara.stopAttack();
+                                });
+                                //Freeze target
+                                if (target.stopAttack) target.stopAttack();
+                                target.dock();
+                                //Load target
+                                myself.loadedUnits.push(target);
+                                //Erase target from map
+                                Unit.allUnits.splice(Unit.allUnits.indexOf(target),1);
+                                //Kick to other space, no die voice
+                                target.x=target.y=-100;
+                                //Reset all teams: replace passenger with transport
+                                for (var N in Game.teams){
+                                    var team=Game.teams[N];
+                                    team.forEach(function(chara,n){
+                                        if (chara==target) team[n]=myself;//team.splice(n,1)
+                                    });
+                                    $.unique(team);
+                                }
+                                //Refresh passenger number
+                                if (Game.selectedUnit==myself) Game.refreshInfo();
+                                //Sound effect
+                                if (myself.insideScreen()){
+                                    switch (myself.name){
+                                        case 'Overlord':
+                                            new Audio(Game.CDN+'bgm/Magic.Load.Zerg.wav').play();
+                                            break;
+                                        case 'Dropship':
+                                            new Audio(Game.CDN+'bgm/Magic.Load.Terran.wav').play();
+                                            break;
+                                        case 'Shuttle':
+                                            new Audio(Game.CDN+'bgm/Magic.Load.Protoss.wav').play();
+                                            break;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            //If missing location info, mark Button.callback, mouseController will call back with location
+            else {
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
+                $('div.GameLayer').attr('status','button');
+            }
+        }
     },
     UnloadAll:{
         name:"UnloadAll",
         enabled:false,
-        spell:function(location){}
+        spell:function(){
+            var myself=this;
+            this.loadedUnits.forEach(function(chara){
+                //Transport here
+                chara.x=myself.x;
+                chara.y=myself.y;
+                //Add this unit into Game
+                Unit.allUnits.push(chara);
+            });
+            //Flying units show above ground units
+            Unit.sortAllUnits();
+            //Clear loaded units
+            this.loadedUnits=[];
+            //Refresh passenger number
+            if (Game.selectedUnit==this) Game.refreshInfo();
+            //Sound effect
+            if (myself.insideScreen()){
+                switch (myself.name){
+                    case 'Overlord':
+                        new Audio(Game.CDN+'bgm/Magic.Unload.Zerg.wav').play();
+                        break;
+                    case 'Dropship':
+                        new Audio(Game.CDN+'bgm/Magic.Unload.Terran.wav').play();
+                        break;
+                    case 'Shuttle':
+                        new Audio(Game.CDN+'bgm/Magic.Unload.Protoss.wav').play();
+                        break;
+                }
+            }
+        }
+    },
+    SetRallyPoint:{
+        name:"SetRallyPoint",
+        enabled:true,
+        //Exception for those without credit
+        needLocation:true,
+        spell:function(location){
+            //Has location callback info or nothing
+            if (location){
+                //Record rally point for buildings
+                this.rallyPoint=location;
+            }
+            //If missing location info, mark Button.callback, mouseController will call back with location
+            else {
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
+                $('div.GameLayer').attr('status','button');
+            }
+        }
     },
     Lurker:{
         name:"Lurker",
@@ -107,7 +222,40 @@ var Magic={
     InfestTerranCommandCenter:{
         name:"InfestTerranCommandCenter",
         enabled:true,
-        spell:function(location){}
+        needLocation:true,
+        spell:function(location){
+            //Has location callback info or nothing
+            if (location){
+                //Target enemy building: Injured Command Center
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),false,null,function(chara){
+                    return chara.name=='CommandCenter' && chara.life/chara.get('HP')<0.5;
+                });
+                if (target instanceof Gobj){
+                    this.targetLock=true;
+                    //Move toward target to infest command center
+                    var myself=this;
+                    this.moveToward(target,Unit.meleeRange,function(){
+                        if (target.status!='dead' && target.life/target.get('HP')<0.5){
+                            //Change side
+                            target.team=myself.team;
+                            //Order ours not to attack it anymore
+                            Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
+                                if (chara.target==target) chara.stopAttack();
+                            });
+                            target.evolveTo({
+                                type:Building.ZergBuilding.InfestedBase
+                            });
+                        }
+                    });
+                }
+            }
+            //If missing location info, mark Button.callback, mouseController will call back with location
+            else {
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
+                $('div.GameLayer').attr('status','button');
+            }
+        }
     },
     Parasite:{
         name:"Parasite",
@@ -118,7 +266,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Target enemy unit
-                var target=Game.getSelectedOne(location.x,location.y,true,true);
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),true);
                 if (target instanceof Gobj){
                     var myself=this;
                     this.targetLock=true;
@@ -131,19 +279,19 @@ var Magic={
                                 to:target,
                                 damage:0
                             });
-                            myself.bullet=bullet;
                             bullet.fire(function(){
                                 //Effect:should steal target sight
-                                target.buffer.Parasite=true;
+                                target.buffer.Parasite=myself.team;
                             });
                         }
                     });
                 }
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -157,7 +305,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Kill enemy unit ground
-                var target=Game.getSelectedOne(location.x,location.y,true,true,false);
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),true,false);
                 if (target instanceof Gobj){
                     var myself=this;
                     this.targetLock=true;
@@ -170,22 +318,22 @@ var Magic={
                                 to:target,
                                 damage:99999
                             });
-                            myself.bullet=bullet;
                             //Effect
                             bullet.fire(function(){
                                 for (var n=0;n<2;n++){
-                                    new Zerg.Broodling({x:target.posX(),y:target.posY()});
+                                    new Zerg.Broodling({x:target.posX(),y:target.posY(),team:myself.team});
                                 }
                             });
                         }
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -208,17 +356,16 @@ var Magic={
                             from:myself,
                             to:{x:location.x,y:location.y}
                         });
-                        myself.bullet=bullet;
                         //Fire Ensnare bullet with callback
                         bullet.fire(function(){
                             //Ensnare animation and sound
                             var anime=new Animation.Ensnare({x:location.x,y:location.y});
-                            if (anime.insideScreen()) new Audio('bgm/Magic.Ensnare.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Ensnare.wav').play();
                             //Get in range enemy units
-                            var targets=Game.getInRangeOnes(location.x,location.y,[76*1.2>>0,62*1.2>>0],true,true);
+                            var targets=Game.getInRangeOnes(location.x,location.y,[76*1.2>>0,62*1.2>>0],myself.team.toString(),true);
                             //Slow moving speed
                             var bufferObj={
-                                speed:Unit.getSpeedMatrixBy(2)
+                                speed:2
                             };
                             //Effect
                             targets.forEach(function(chara){
@@ -227,7 +374,7 @@ var Magic={
                                 chara.buffer.Ensnare=true;
                                 chara.addBuffer(bufferObj);
                                 //Green effect
-                                new Animation.GreenEffect({target:chara,callback:function(){
+                                new Animation.GreenEffect({team:myself.team,target:chara,callback:function(){
                                     if (chara.status!='dead' && chara.buffer.Ensnare){
                                         //Restore
                                         if (chara.removeBuffer(bufferObj)) delete chara.buffer.Ensnare;
@@ -240,7 +387,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -248,11 +396,12 @@ var Magic={
     Consume:{
         name:"Consume",
         enabled:false,
+        needLocation:true,
         spell:function(location){
             //Has location callback info or nothing
             if (location){
                 //Kill our unit ground
-                var target=Game.getSelectedOne(location.x,location.y,false,true,false);
+                var target=Game.getSelectedOne(location.x,location.y,this.team,true,false);
                 if (target instanceof Gobj){
                     var myself=this;
                     this.targetLock=true;
@@ -261,7 +410,7 @@ var Magic={
                         //Effect
                         var anime=new Animation.Consume({target:target,callback:function(){
                             //Consume sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.Consume.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Consume.wav').play();
                             //Consume animation missing
                             target.die();
                             myself.magic+=50;
@@ -272,7 +421,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -281,7 +431,7 @@ var Magic={
         name:"DarkSwarm",
         cost:{magic:100},
         credit:true,
-        _timer:0,
+        _timer:false,
         enabled:true,
         spell:function(location){
             //Has location callback info or nothing
@@ -325,7 +475,7 @@ var Magic={
                                 //Get targets inside all of swarms
                                 darkSwarms.forEach(function(swarm){
                                     //Update buffer on our ground units inside swarm
-                                    targets=targets.concat(Game.getInRangeOnes(swarm.posX(),swarm.posY(),[126*1.2>>0,94*1.2>>0],false,true,false));
+                                    targets=targets.concat(Game.getInRangeOnes(swarm.posX(),swarm.posY(),[126*1.2>>0,94*1.2>>0],null,true,false));
                                 });
                                 $.unique(targets);
                                 //Effect
@@ -333,9 +483,10 @@ var Magic={
                                     //Guard from range-attack enemy
                                     chara.addBuffer(bufferObj);
                                 });
-                                Magic.DarkSwarm._timer=setTimeout(darkSwarm,1000);
+                                Game.commandTimeout(darkSwarm,1000);
+                                Magic.DarkSwarm._timer=true;
                             }
-                            else Magic.DarkSwarm._timer=0;
+                            else Magic.DarkSwarm._timer=false;
                         };
                         //If not calculating, execute
                         if (!Magic.DarkSwarm._timer) darkSwarm();
@@ -344,7 +495,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -364,9 +516,9 @@ var Magic={
                     if (Resource.payCreditBill.call(myself)){
                         //Plague animation and sound
                         var anime=new Animation.Plague({x:location.x,y:location.y});
-                        if (anime.insideScreen()) new Audio('bgm/Magic.Ensnare.wav').play();
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Ensnare.wav').play();
                         //Get in range enemy units
-                        var targets=Game.getInRangeOnes(location.x,location.y,[64*1.2>>0,64*1.2>>0],true,true);
+                        var targets=Game.getInRangeOnes(location.x,location.y,[64*1.2>>0,64*1.2>>0],myself.team.toString(),true);
                         //Effect:HP losing every seconds
                         var bufferObj={
                             recover:function(){
@@ -381,7 +533,7 @@ var Magic={
                             //HP losing every seconds
                             chara.addBuffer(bufferObj);
                             //Green effect
-                            new Animation.RedEffect({target:chara,callback:function(){
+                            new Animation.RedEffect({team:myself.team,target:chara,callback:function(){
                                 if (chara.status!='dead' && chara.buffer.Plague){
                                     //Restore
                                     if (chara.removeBuffer(bufferObj)) delete chara.buffer.Plague;
@@ -393,7 +545,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -409,17 +562,17 @@ var Magic={
                 this.life-=10;
                 if (this.life<1) this.life=1;
                 //Stim sound
-                if (this.insideScreen()) new Audio('bgm/Magic.StimPacks.wav').play();
+                if (this.insideScreen()) new Audio(Game.CDN+'bgm/Magic.StimPacks.wav').play();
                 //Effect
                 var bufferObj={
                     attackInterval:800,
-                    speed:Unit.getSpeedMatrixBy(14)
+                    speed:14
                 };
                 this.addBuffer(bufferObj);
                 this.buffer.Stim=true;
                 //Will only be stim for 15sec
                 var myself=this;
-                setTimeout(function(){
+                Game.commandTimeout(function(){
                     if (myself.status!='dead' && myself.buffer.Stim){
                         //Special effect is over
                         if (myself.removeBuffer(bufferObj)) delete myself.buffer.Stim;
@@ -436,9 +589,11 @@ var Magic={
             //Will only be invisible when having magic
             if (!this.cloakBuffer) {
                 var bufferObj={
-                    isInvisible:true,
                     //Magic losing every seconds
                     recover:function(){
+                        //Should not forbid old recover
+                        this.constructor.prototype.recover.call(this);
+                        //Losing magic
                         if (this.magic>0 && !Cheat.gathering) this.magic--;
                         if (this.magic<=0) {
                             //Might be negative float
@@ -449,11 +604,14 @@ var Magic={
                                 delete this.cloakBuffer;
                                 //Recover icons and apply callbacks
                                 delete this.items;
-                                Button.reset();
+                                if (Game.selectedUnit==this) Button.reset();
                             }
                         }
                     }
                 };
+                for (var N=0;N<Game.playerNum;N++){
+                    bufferObj['isInvisible'+N]=true;
+                }
                 //Effect
                 this.buffer.Cloak=true;
                 this.addBuffer(bufferObj);
@@ -466,7 +624,7 @@ var Magic={
             }
             this.items=items;
             //Apply callback
-            Button.reset();
+            if (Game.selectedUnit==this) Button.reset();
         }
     },
     Decloak:{
@@ -482,7 +640,7 @@ var Magic={
             }
             //Recover icons and apply callbacks
             delete this.items;
-            Button.reset();
+            if (Game.selectedUnit==this) Button.reset();
         }
     },
     Lockdown:{
@@ -494,7 +652,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Target enemy unit, machine unit
-                var target=Game.getSelectedOne(location.x,location.y,true,true,null,function(chara){
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),true,null,function(chara){
                     return chara.isMachine() && !chara.buffer.Lockdown;
                 });
                 if (target instanceof Gobj){
@@ -509,11 +667,11 @@ var Magic={
                                 to:target,
                                 damage:0
                             });
-                            myself.bullet=bullet;
                             bullet.fire(function(){
                                 //Lockdown effect
                                 if (target.status!='dead'){
                                     //Stop target
+                                    if (target.stopAttack) target.stopAttack();
                                     target.dock();
                                     var bufferObj={
                                         moveTo:function(){},
@@ -523,7 +681,6 @@ var Magic={
                                     //Freeze status
                                     target.addBuffer(bufferObj);
                                     target.stop();
-                                    clearInterval(target.dockTimer);
                                     //Flag
                                     target.buffer.Lockdown=true;
                                     //Lockdown animation, show hidden frames first
@@ -536,25 +693,27 @@ var Magic={
                                     }});
                                     anime.action=7;
                                     //Lockdown sound
-                                    if (anime.insideScreen()) new Audio('bgm/Magic.Lockdown.wav').play();
+                                    if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Lockdown.wav').play();
                                 }
                             });
                         }
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
     },
     NuclearStrike:{
         name:"NuclearStrike",
-        enabled:1,
+        enabled:1,//Different copies for different team
+        needLocation:true,
         spell:function(location){
             //Has location callback info or nothing
             if (location){
@@ -567,7 +726,6 @@ var Magic={
                         from:{x:location.x,y:location.y-250},
                         to:{x:location.x,y:location.y}
                     });
-                    myself.bullet=bullet;
                     //Fire Nuclear bomb with callback
                     bullet.fire(function(){
                         //Nuclear bomb effect, should earlier than bomb animation draw
@@ -581,18 +739,19 @@ var Magic={
                         //Nuclear animation
                         var anime=new Animation.NuclearStrike({x:location.x,y:location.y});
                         //Nuclear sound
-                        if (anime.insideScreen()) new Audio('bgm/Magic.NuclearStrike.wav').play();
-                        //Use one bomb
-                        if (Magic.NuclearStrike.enabled>0) {
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.NuclearStrike.wav').play();
+                        //Use one our bomb
+                        if (Magic.NuclearStrike.enabled>0 && myself.team==Game.team) {
                             Magic.NuclearStrike.enabled--;
-                            Button.reset();
+                            if (Game.selectedUnit==myself) Button.refreshButtons();
                         }
                     });
                 });
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -607,33 +766,31 @@ var Magic={
             if (location){
                 var myself=this;
                 //Heal our units on ground, animal unit
-                var target=Game.getSelectedOne(location.x,location.y,false,true,false,function(chara){
+                var target=Game.getSelectedOne(location.x,location.y,this.team,true,false,function(chara){
                     return !(chara.isMachine());
                 });
                 if (target instanceof Gobj){
                     this.targetLock=true;
                     //Move toward target to heal him
-                    this.moveToward(target,70,function(){
-                        //Heal target until becoming healthy
-                        var healTimer=setInterval(function(){
-                            //Medic has magic and target is injured
-                            if (myself.magic && target.life<target.get('HP')) {
-                                //Heal target
-                                target.life+=10;
-                                if (target.life>target.get('HP')) target.life=target.get('HP');
-                                myself.magic-=5;
-                                //Heal action and sound
-                                if (myself.insideScreen()) new Audio('bgm/Magic.Heal.wav').play();
-                            }
-                            else clearInterval(healTimer);
-                        },500);
+                    this.moveToward(target,target.radius()+10,function(){
+                        //Consume magic to heal injured target
+                        if (myself.magic && target.life<target.get('HP')) {
+                            //Heal target
+                            target.life+=10;
+                            if (target.life>target.get('HP')) target.life=target.get('HP');
+                            myself.magic--;
+                            //Heal action and sound
+                            if (myself.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Heal.wav').play();
+                        }
+                        //# Need heal target automatically until it becomes healthy
                     });
                 }
-                delete Resource.creditBill;//else
+                delete this.creditBill;//else
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -657,7 +814,7 @@ var Magic={
                             //Restore effect
                             var anime=new Animation.Restoration({target:target});
                             //Restore sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.Restoration.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Restoration.wav').play();
                             //Remove all bufferObjs
                             $.extend([],target.bufferObjs).forEach(function(bufferObj){
                                 target.removeBuffer(bufferObj);
@@ -678,11 +835,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -696,7 +854,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Shoot enemy unit
-                var target=Game.getSelectedOne(location.x,location.y,true,true);
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),true);
                 if (target instanceof Gobj){
                     var myself=this;
                     this.targetLock=true;
@@ -709,7 +867,6 @@ var Magic={
                                 to:target,
                                 damage:0
                             });
-                            myself.bullet=bullet;
                             bullet.fire(function(){
                                 //Effect
                                 var bufferObj={
@@ -723,11 +880,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -759,7 +917,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Restore our units
-                var target=Game.getSelectedOne(location.x,location.y,false,true,null,function(chara){
+                var target=Game.getSelectedOne(location.x,location.y,this.team,true,null,function(chara){
                     return !chara.buffer.DefensiveMatrix;//Not again
                 });
                 if (target instanceof Gobj){
@@ -776,7 +934,7 @@ var Magic={
                                 }
                             }});
                             //DefensiveMatrix sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.DefensiveMatrix.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.DefensiveMatrix.wav').play();
                             //Defensive matrix effect: absorb 250 damage
                             var matrixHP=250;
                             var bufferObj={
@@ -809,11 +967,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -836,15 +995,14 @@ var Magic={
                             from:myself,
                             to:{x:location.x,y:location.y}
                         });
-                        myself.bullet=bullet;
                         //Fire EMPShockwave bullet with callback
                         bullet.fire(function(){
                             //EMP shockwave animation
                             var anime=new Animation.EMPShockwave({x:location.x,y:location.y});
                             //EMPShockwave sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.EMPShockwave.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.EMPShockwave.wav').play();
                             //Get in range enemies
-                            var targets=Game.getInRangeOnes(location.x,location.y,[90*1.2>>0,74*1.2>>0],true);
+                            var targets=Game.getInRangeOnes(location.x,location.y,[90*1.2>>0,74*1.2>>0],myself.team.toString());
                             //Effect
                             targets.forEach(function(chara){
                                 //Losing all shield and magic
@@ -857,7 +1015,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -871,7 +1030,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Target enemy unit, animal unit
-                var target=Game.getSelectedOne(location.x,location.y,true,true,null,function(chara){
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),true,null,function(chara){
                     return !(chara.isMachine()) && !chara.buffer.Irradiate;
                 });
                 if (target instanceof Gobj){
@@ -883,24 +1042,26 @@ var Magic={
                             //Restore after 25 seconds, dealing 250 damage
                             if (chara.status!='dead' && chara.buffer.Irradiate){
                                 if (chara.removeBuffer(bufferObj)) delete chara.buffer.Irradiate;
-                                clearInterval(chara.dockTimer);
+                                delete chara.allFrames['dock'];
                                 chara.dock();
                             }
                         }});
                         //Irradiate sound
-                        if (anime.insideScreen()) new Audio('bgm/Magic.Irradiate.wav').play();
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Irradiate.wav').play();
                         //Losing life over time and walk around
                         chara.buffer.Irradiate=true;//Flag
                         var bufferObj={
                             recover:function(){
                                 //Get in range enemies and infect
-                                Game.getInRangeOnes(chara.posX(),chara.posY(),50,true,true,null,function(chara){
+                                Game.getInRangeOnes(chara.posX(),chara.posY(),50,myself.team.toString(),true,null,function(chara){
                                     return !(chara.isMachine()) && !chara.buffer.Irradiate;
                                 }).forEach(function(chara){
                                     irradiate(chara);
                                 });
                                 if (this.life>0) this.life-=10;//Refresh every 1 seconds
-                                if (this.life<=0) this.die();
+                                if (this.life<=0) {
+                                    this.die();
+                                }
                             },
                             dock:Neutral.Bengalaas.prototype.dock
                         };
@@ -915,11 +1076,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -933,7 +1095,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Shoot all enemy
-                var target=Game.getSelectedOne(location.x,location.y,true);
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString());
                 if (target instanceof Gobj){
                     var myself=this;
                     this.targetLock=true;
@@ -946,18 +1108,18 @@ var Magic={
                                 to:target,
                                 damage:250
                             });
-                            myself.bullet=bullet;
                             bullet.fire();
-                            if (myself.insideScreen()) new Audio('bgm/HeroCruiser.attack.wav').play();
+                            if (myself.insideScreen()) new Audio(Game.CDN+'bgm/HeroCruiser.attack.wav').play();
                         }
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -972,21 +1134,27 @@ var Magic={
             if (location){
                 if (Resource.payCreditBill.call(this)){
                     //ScannerSweep animation
-                    var anime=new Animation.ScannerSweep({x:location.x,y:location.y});
+                    var anime=new Animation.ScannerSweep({x:location.x,y:location.y,team:this.team});
                     //ScannerSweep sound
-                    if (anime.insideScreen()) new Audio('bgm/Magic.ScannerSweep.wav').play();
+                    if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.ScannerSweep.wav').play();
                 }
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
     },
     ArmNuclearSilo:{
         name:"ArmNuclearSilo",
-        cost:{mine:200,gas:200,man:8},
+        cost:{
+            mine:200,
+            gas:200,
+            man:8,
+            time:600
+        },
         enabled:true,
         spell:function(){
             Magic.NuclearStrike.enabled++;
@@ -1008,7 +1176,7 @@ var Magic={
         name:"PsionicStorm",
         cost:{magic:75},
         credit:true,
-        _timer:0,
+        _timer:false,
         speller:{},
         enabled:false,
         spell:function(location){
@@ -1022,7 +1190,7 @@ var Magic={
                         //PsionicStorm animation
                         var anime=new Animation.PsionicStorm({x:location.x,y:location.y});
                         //PsionicStorm sound
-                        if (anime.insideScreen()) new Audio('bgm/Magic.PsionicStorm.wav').play();
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.PsionicStorm.wav').play();
                         //PsionicStorm effect
                         var targets=[];
                         Magic.PsionicStorm.speller=this;
@@ -1047,9 +1215,10 @@ var Magic={
                                     //Don't move, but will die if no life
                                     chara.reactionWhenAttackedBy(Magic.PsionicStorm.speller,true);
                                 });
-                                Magic.PsionicStorm._timer=setTimeout(stormWave,1000);
+                                Game.commandTimeout(stormWave,1000);
+                                Magic.PsionicStorm._timer=true;
                             }
-                            else Magic.PsionicStorm._timer=0;
+                            else Magic.PsionicStorm._timer=false;
                         };
                         //If not calculating, execute
                         if (!Magic.PsionicStorm._timer) stormWave();
@@ -1058,7 +1227,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1082,7 +1252,7 @@ var Magic={
                             //Hallucination effect
                             var anime=new Animation.Hallucination({target:target});
                             //Hallucination sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.Hallucination.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Hallucination.wav').play();
                             //Initial
                             var halluDamage, halluAttackMode, Hallucinations=[];
                             if (target.attack!=null) {
@@ -1106,11 +1276,11 @@ var Magic={
                                 }
                             });
                             for (var n=0;n<2;n++){
-                                var hallucination=new halluConstructor({x:target.posX(),y:target.posY()});
+                                var hallucination=new halluConstructor({x:target.posX(),y:target.posY(),team:myself.team});
                                 Hallucinations.push(hallucination);
                             }
                             //Will disappear after 180 seconds
-                            setTimeout(function(){
+                            Game.commandTimeout(function(){
                                 Hallucinations.forEach(function(chara){
                                     chara.die();
                                 });
@@ -1119,11 +1289,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1137,7 +1308,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Target enemy unit, magician
-                var target=Game.getSelectedOne(location.x,location.y,true,true,null,function(chara){
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString(),true,null,function(chara){
                     return chara.MP;
                 });
                 if (target instanceof Gobj){
@@ -1149,7 +1320,7 @@ var Magic={
                             //Feedback effect
                             var anime=new Animation.Feedback({target:target});
                             //Feedback sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.Feedback.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Feedback.wav').play();
                             //Deal damage same as its magic, lose all magic
                             target.getDamageBy(target.magic);
                             target.reactionWhenAttackedBy(myself);
@@ -1158,11 +1329,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1176,7 +1348,7 @@ var Magic={
             //Has location callback info or nothing
             if (location){
                 //Can control all enemy
-                var target=Game.getSelectedOne(location.x,location.y,true);
+                var target=Game.getSelectedOne(location.x,location.y,this.team.toString());
                 if (target instanceof Gobj){
                     var myself=this;
                     this.targetLock=true;
@@ -1186,22 +1358,13 @@ var Magic={
                             //Mind control animation
                             var anime=new Animation.MindControl({target:target});
                             //MindControl sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.MindControl.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.MindControl.wav').play();
                             //Control and tame enemy
-                            target.isEnemy=false;
+                            target.team=myself.team;
                             //Order ours not to attack it anymore
-                            Unit.allOurUnits().concat(Building.ourBuildings).forEach(function(chara){
+                            Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
                                 if (chara.target==target) chara.stopAttack();
                             });
-                            //Rearrange side: code piece from unit constructor
-                            if (target.isFlying) {
-                                Unit.enemyFlyingUnits.splice(Unit.enemyFlyingUnits.indexOf(target),1);
-                                Unit.ourFlyingUnits.push(target);
-                            }
-                            else {
-                                Unit.enemyGroundUnits.splice(Unit.enemyGroundUnits.indexOf(target),1);
-                                Unit.ourGroundUnits.push(target);
-                            }
                             //Freeze target
                             if (target.stopAttack) target.stopAttack();
                             target.dock();
@@ -1209,11 +1372,12 @@ var Magic={
                     });
                 }
                 //Empty object {}, cannot spell
-                else delete Resource.creditBill;
+                else delete this.creditBill;
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1234,7 +1398,7 @@ var Magic={
                         //MaelStorm spell animation
                         var anime=new Animation.MaelStormSpell({x:location.x,y:location.y,callback:function(){
                             //Get in range enemy units, animal
-                            var targets=Game.getInRangeOnes(location.x,location.y,[64*1.2>>0,64*1.2>>0],true,true,null,function(chara){
+                            var targets=Game.getInRangeOnes(location.x,location.y,[64*1.2>>0,64*1.2>>0],myself.team.toString(),true,null,function(chara){
                                 return !(chara.isMachine()) && !chara.buffer.MaelStorm;
                             });
                             //Freeze target
@@ -1259,16 +1423,17 @@ var Magic={
                                 }});
                             });
                             //MaelStorm sound
-                            if (anime.insideScreen()) new Audio('bgm/Magic.MaelStorm.wav').play();
+                            if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.MaelStorm.wav').play();
                         }});
                         //MaelStormSpell sound
-                        if (anime.insideScreen()) new Audio('bgm/Magic.StasisField.wav').play();
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.StasisField.wav').play();
                     }
                 });
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1283,7 +1448,7 @@ var Magic={
         spell:function(){
             this.scarabNum++;
             //Refresh to disabled
-            Button.reset();
+            if (Game.selectedUnit==this) Button.refreshButtons();
         }
     },
     Interceptor:{
@@ -1297,7 +1462,7 @@ var Magic={
             //Build interceptor
             this.continuousAttack.count++;
             //Refresh to disabled
-            Button.reset();
+            if (Game.selectedUnit==this) Button.refreshButtons();
         }
     },
     Recall:{
@@ -1313,11 +1478,11 @@ var Magic={
                     //Recall animation
                     var anime=new Animation.Recall({x:location.x,y:location.y,callback:function(){
                         //Get in range our units
-                        var targets=Game.getInRangeOnes(location.x,location.y,50*1.2>>0,false,true);
+                        var targets=Game.getInRangeOnes(location.x,location.y,50*1.2>>0,myself.team,true);
                         //Recall animation again
                         var animeII=new Animation.Recall({x:myself.posX(),y:myself.posY()});
                         //Recall sound
-                        if (animeII.insideScreen()) new Audio('bgm/Magic.Recall.wav').play();
+                        if (animeII.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Recall.wav').play();
                         //Effect
                         targets.forEach(function(chara){
                             //Relocate targets
@@ -1326,12 +1491,13 @@ var Magic={
                         });
                     }});
                     //Recall sound
-                    if (anime.insideScreen()) new Audio('bgm/Magic.Recall.wav').play();
+                    if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.Recall.wav').play();
                 }
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1372,7 +1538,6 @@ var Magic={
                                     target.addBuffer(bufferObj);
                                     //Stasis status
                                     target.stop();
-                                    clearInterval(target.dockTimer);
                                     //Stasis field animation
                                     new Animation.StasisField({target:target,callback:function(){
                                         //Restore in 30 seconds
@@ -1387,13 +1552,14 @@ var Magic={
                             });
                         }});
                         //StasisField sound
-                        if (anime.insideScreen()) new Audio('bgm/Magic.StasisField.wav').play();
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.StasisField.wav').play();
                     }
                 });
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1402,7 +1568,7 @@ var Magic={
         name:"DisruptionWeb",
         cost:{magic:125},
         credit:true,
-        _timer:0,
+        _timer:false,
         enabled:false,
         spell:function(location){
             //Has location callback info or nothing
@@ -1415,7 +1581,7 @@ var Magic={
                         //DisruptionWeb animation
                         var anime=new Animation.DisruptionWeb({x:location.x,y:location.y});
                         //DisruptionWeb sound
-                        if (anime.insideScreen()) new Audio('bgm/Magic.DisruptionWeb.wav').play();
+                        if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.DisruptionWeb.wav').play();
                         //Dynamic update targets every 1 second
                         var targets=[];
                         //Effect:Disable target attack
@@ -1437,7 +1603,7 @@ var Magic={
                                 //Get targets inside all of webs
                                 disruptionWebs.forEach(function(web){
                                     //Update buffer on enemy ground units inside web
-                                    targets=targets.concat(Game.getInRangeOnes(web.posX(),web.posY(),[76*1.2>>0,56*1.2>>0],true,true,false));
+                                    targets=targets.concat(Game.getInRangeOnes(web.posX(),web.posY(),[76*1.2>>0,56*1.2>>0],null,true,false));
                                 });
                                 $.unique(targets);
                                 //Effect
@@ -1448,9 +1614,10 @@ var Magic={
                                         chara.addBuffer(bufferObj);
                                     }
                                 });
-                                Magic.DisruptionWeb._timer=setTimeout(disruptionWeb,1000);
+                                Game.commandTimeout(disruptionWeb,1000);
+                                Magic.DisruptionWeb._timer=true;
                             }
-                            else Magic.DisruptionWeb._timer=0;
+                            else Magic.DisruptionWeb._timer=false;
                         };
                         //If not calculating, execute
                         if (!Magic.DisruptionWeb._timer) disruptionWeb();
@@ -1459,7 +1626,8 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
         }
@@ -1467,19 +1635,20 @@ var Magic={
     RechargeShields:{
         name:"RechargeShields",
         enabled:true,
+        needLocation:true,
         spell:function(location){
             //Has location callback info or nothing
             if (location){
                 var myself=this;
                 //Restore our units, have shield and in sight
-                var target=Game.getSelectedOne(location.x,location.y,false,true,null,function(chara){
+                var target=Game.getSelectedOne(location.x,location.y,this.team,true,null,function(chara){
                     return chara.SP && myself.canSee(chara);
                 });
                 if (target instanceof Gobj){
                     //Recharge shield animation
                     var anime=new Animation.RechargeShields({target:target});
                     //Recharge shield sound
-                    if (anime.insideScreen()) new Audio('bgm/Magic.RechargeShields.wav').play();
+                    if (anime.insideScreen()) new Audio(Game.CDN+'bgm/Magic.RechargeShields.wav').play();
                     var hurt=target.get('SP')-target.shield;
                     var needMagic=(hurt/2+0.5)>>0;
                     //Remaining magic is sufficient
@@ -1501,9 +1670,21 @@ var Magic={
             }
             //If missing location info, mark Button.callback, mouseController will call back with location
             else {
-                Button.callback=_$.hitch(arguments.callee,this);
+                Button.callback=arguments.callee;
+                Button.callback.owner=this;
                 $('div.GameLayer').attr('status','button');
             }
+        }
+    },
+    /********RPG level: Tower Defense********/
+    CleanScreen:{
+        name:"CleanScreen",
+        cost:{
+            mine:200
+        },
+        spell:function(){
+            //Kill all enemies
+            Cheat.execute('fuck your mother');
         }
     }
 };

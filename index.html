@@ -1,8 +1,11 @@
-﻿<!DOCTYPE HTML>
+<!DOCTYPE HTML>
 <html>
     <head>
-        <meta charset="UTF-8">
         <title>StarCraft</title>
+        <meta charset="UTF-8"/>
+        <meta name="keywords" content="starcraft,html5,game,starcraft html5,starcraft online,starcraft web"/>
+        <meta name="description" content="HTML5 version of StarCraft game"/>
+        <meta name="author" content="Ryuta Gloomyson"/>
         <link rel="stylesheet" href="css/style.css" />
         <link rel="stylesheet" href="css/mapStyle.css" />
         <link rel="stylesheet" href="css/buttonStyle.css" />
@@ -25,6 +28,7 @@
             <canvas id="backCanvas"></canvas>
             <canvas id="middleCanvas"></canvas>
             <canvas id="frontCanvas"></canvas>
+            <canvas id="fogCanvas"></canvas>
             <div class="panel_Map">
                 <canvas name="mini_map" width="130" height="130"></canvas>
             </div>
@@ -45,10 +49,12 @@
                     <p class="damage">Damage:<span></span></p>
                     <p class="armor">Armor:<span></span></p>
                     <p class="plasma">Plasma:<span></span></p>
+                    <p class="passenger">Passenger:<span></span></p>
+                    <p class="icons"></p>
                 </div>
                 <div class="infoRight">
                     <div class="upgraded">
-                        Upgraded:&nbsp;&nbsp;
+                        Upgraded:
                         <div name="icon"></div>
                         <div name="icon"></div>
                         <div name="icon"></div>
@@ -117,6 +123,7 @@
         <script src="Characters/Bullets.js"></script>
         <script src="Characters/Button.js"></script>
         <script src="Characters/Map.js"></script>
+        <script src="GameRule/Multiplayer.js"></script>
         <script src="GameRule/Resource.js"></script>
         <script src="GameRule/Referee.js"></script>
         <script src="GameRule/Game.js"></script>
@@ -127,9 +134,9 @@
 
         <script>
             //########## AutoStart ##########//
-            $('body')[0].onload=function(){
+            $(function(){
                 Game.init();
-            };
+            });
         </script>
     </body>
 </html>
