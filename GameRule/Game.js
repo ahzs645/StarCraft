@@ -290,9 +290,7 @@ var Game={
         Referee.detectedUnits=Game.getPropArray([]);
         for (var N=0;N<Game.playerNum;N++){
             //Initial detector buffer
-            var buffer={};
-            buffer['isInvisible'+N]=false;
-            Gobj.detectorBuffer.push(buffer);
+            Gobj.detectorBuffer['isInvisible'+N]=false;
             //Initial arbiter buffer
             Protoss.Arbiter.prototype.bufferObj['isInvisible'+N]=true;
         }

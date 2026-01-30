@@ -1,4 +1,6 @@
 var Referee={
+    //Tasks to run each game frame
+    tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan','judgeWinLose','alterSelectionMode'],
     ourDetectedUnits:[],//Detected enemies
     enemyDetectedUnits:[],//Detected ours
     ourUnderArbiterUnits:[],
@@ -35,11 +37,11 @@ var Referee={
     },
     winCondition:function(){
         //By default: All our units and buildings are killed
-        return (Unit.allEnemyUnits().length==0 && Building.enemyBuildings.length==0);
+        return (Unit.allEnemyUnits().length==0 && Building.enemyBuildings().length==0);
     },
     loseCondition:function(){
         //By default: All enemies and buildings are killed
-        return (Unit.allOurUnits().length==0 && Building.ourBuildings.length==0);
+        return (Unit.allOurUnits().length==0 && Building.ourBuildings().length==0);
     },
     judgeArbiter:function(){
         //Every 0.4 sec
@@ -87,10 +89,10 @@ var Referee={
         if (Game._clock%4==0){
             //Same detector buffer reference
             var detectorBuffer=Gobj.detectorBuffer;
-            var ourDetectors=Unit.allOurUnits().concat(Building.ourBuildings).filter(function(chara){
+            var ourDetectors=Unit.allOurUnits().concat(Building.ourBuildings()).filter(function(chara){
                 return chara.detector;
             });
-            var enemyDetectors=Unit.allEnemyUnits().concat(Building.enemyBuildings).filter(function(chara){
+            var enemyDetectors=Unit.allEnemyUnits().concat(Building.enemyBuildings()).filter(function(chara){
                 return chara.detector;
             });
             //Clear old units detected buffer
@@ -302,7 +304,7 @@ var Referee={
     alterSelectionMode:function(){
         //GC after some user changes
         $.extend([],Game.allSelected).forEach(function(chara){
-            if (chara.status=='dead' || (chara.isInvisible && chara.isEnemy))
+            if (chara.status=='dead' || (chara.isInvisible && chara.isEnemy()))
                 Game.allSelected.splice(Game.allSelected.indexOf(chara),1);
         });
         //Alter info UI: Multi selection mode
@@ -337,7 +339,7 @@ var Referee={
                 //Can give birth to 3 larvas
                 for(var N=0;N<3;N++){
                     if (chara.larvas[N]==null || chara.larvas[N].status=="dead"){
-                        chara.larvas[N]=new Zerg.Larva({x:(chara.x+N*48),y:(chara.y+chara.height),isEnemy:chara.isEnemy});
+                        chara.larvas[N]=new Zerg.Larva({x:(chara.x+N*48),y:(chara.y+chara.height),team:chara.team});
                         break;
                     }
                 }
@@ -347,7 +349,7 @@ var Referee={
     judgeMan:function(){
         //Update our current man and total man
         var curMan=0,totalMan=0;
-        Unit.allOurUnits().concat(Building.ourBuildings).forEach(function(chara){
+        Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
             if (chara.cost && chara.cost.man) curMan+=chara.cost.man;
             if (chara.manPlus) totalMan+=chara.manPlus;
         });
@@ -356,7 +358,7 @@ var Referee={
         //Update enemy current man and total man
         curMan=0;
         totalMan=0;
-        Unit.allEnemyUnits().concat(Building.enemyBuildings).forEach(function(chara){
+        Unit.allEnemyUnits().concat(Building.enemyBuildings()).forEach(function(chara){
             if (chara.cost) curMan+=chara.cost.man;
             if (chara.manPlus) totalMan+=chara.manPlus;
         });

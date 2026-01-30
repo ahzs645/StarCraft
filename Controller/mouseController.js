@@ -21,7 +21,7 @@ var mouseController={
             //Find selected one, convert position
             var selectedOne=Game.getSelectedOne(clickX+Map.offsetX,clickY+Map.offsetY);
             //Cannot select enemy invisible unit
-            if (selectedOne.isInvisible && selectedOne.isEnemy) return;
+            if (selectedOne.isInvisible && selectedOne.isEnemy()) return;
             //Single select will unselect all units and only choose selected one
             //Multi select will keep selected status and do nothing
             if (!mouseController.isMultiSelect())
@@ -31,7 +31,7 @@ var mouseController={
                 //Sound effect
                 selectedOne.sound.selected.play();
                 //Cannot multiSelect with enemy
-                if (selectedOne.isEnemy || Game.selectedUnit.isEnemy)
+                if (selectedOne.isEnemy() || (Game.selectedUnit instanceof Gobj && Game.selectedUnit.isEnemy()))
                     Game.unselectAll();
                 //Only selected one to show portrait
                 Game.changeSelectedTo(selectedOne);
@@ -61,7 +61,7 @@ var mouseController={
         new Burst.RightClickCursor({x:clickX+Map.offsetX,y:clickY+Map.offsetY});
         //Find selected one or nothing
         var selectedEnemy=Game.getSelectedOne(clickX+Map.offsetX,clickY+Map.offsetY,true);//isEnemy
-        Unit.allOurUnits().concat(Building.ourBuildings).forEach(function(chara){
+        Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
             //Cannot control dead man
             if (chara.status=="dead") return;
             //Control chara moving if it's selected
@@ -117,7 +117,7 @@ var mouseController={
     },
     dblClick:function(){
         //Multi select same type units
-        if (!Game.selectedUnit.isEnemy) {
+        if (Game.selectedUnit instanceof Gobj && !Game.selectedUnit.isEnemy()) {
             var charas=Unit.allOurUnits().filter(function(chara){
                 return (chara.insideScreen()) && (chara.name==Game.selectedUnit.name);
             });

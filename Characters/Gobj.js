@@ -6,11 +6,14 @@ var Gobj=function(props){
         this.x=(props.target.posX()-this.width/2)>>0;
         this.y=(props.target.posY()-this.height/2)>>0;
     }
+    //Set team from props (team property or isEnemy flag)
+    this.team = props.team != null ? props.team : (props.isEnemy ? 1 : 0);
     this.action=0;//Only for moving
     this.status="";
     this.buffer={};//Buffer names
     this.override={};//Buffer effects
     this.bufferObjs=[];
+    this.allFrames={};//Animation frame functions
     this._timer=-1;
     //Closure
     var _private={_timer:-1};
@@ -86,6 +89,14 @@ Gobj.prototype.stop=function(){
     //this.status="stop";
     this._timer=-1;//Reset to default
 };
+Gobj.prototype.playFrames=function(){
+    //Execute all animation frame functions
+    for (var key in this.allFrames){
+        if (typeof this.allFrames[key] === 'function'){
+            this.allFrames[key]();
+        }
+    }
+};
 Gobj.prototype.die=function(){
     //Clear old timer
     this.stop();
@@ -141,6 +152,9 @@ Gobj.prototype.insideScreen=function(){
 Gobj.prototype.isIdle=function(){
     return this.status=="dock";
 };
+Gobj.prototype.isEnemy=function(){
+    return this.team != Game.team;
+};
 Gobj.prototype.canSee=function(enemy){
     return enemy.inside({centerX:this.posX(),centerY:this.posY(),radius:this.get('sight')});
 };
@@ -148,7 +162,7 @@ Gobj.prototype.get=function(prop){
     //Currently only support upgrade for unit properties, no buildings
     var result=eval('this.'+prop);//Can get A.B.C
     //ShareFlag is symbol for team sharing array, not speed matrix array
-    if ((result instanceof Array) && result.shareFlag) return result[Number(this.isEnemy)];
+    if ((result instanceof Array) && result.shareFlag) return result[Number(this.isEnemy())];
     else return result;
 };
 Gobj.prototype.addBuffer=function(bufferObj,onAll){

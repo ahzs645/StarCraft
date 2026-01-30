@@ -4,7 +4,7 @@ var Unit=Gobj.extends({
         //Add id for unit
         this.id=Unit.currentID++;
         this.direction=(Math.random()*8)>>0;//Random direction,Math.floor
-        this.isEnemy=Boolean(props.isEnemy);//false by default
+        //team is set in Gobj constructor from props.team or props.isEnemy
         this.life=this.get('HP');
         if (this.SP) this.shield=this.get('SP');
         if (this.MP) this.magic=50;
@@ -22,11 +22,11 @@ var Unit=Gobj.extends({
             //Add this unit into Game
             Unit.allUnits.push(myself);
             if (myself.isFlying) {
-                if (myself.isEnemy) Unit.enemyFlyingUnits.push(myself);
+                if (myself.isEnemy()) Unit.enemyFlyingUnits.push(myself);
                 else Unit.ourFlyingUnits.push(myself);
             }
             else {
-                if (myself.isEnemy) Unit.enemyGroundUnits.push(myself);
+                if (myself.isEnemy()) Unit.enemyGroundUnits.push(myself);
                 else Unit.ourGroundUnits.push(myself);
             }
             //Flying units show above ground units
@@ -73,15 +73,17 @@ var Unit=Gobj.extends({
         },
         //Override to use 8 directions speed
         updateLocation:function(){
-            //8 directions speed
-            if (this.get('speed') instanceof Array){
-                this.x+=this.get('speed')[this.direction].x;
-                this.y+=this.get('speed')[this.direction].y;
+            var speed = this.get('speed');
+            var dir = this.direction || 0;
+            //8 directions speed (array of {x,y} objects)
+            if (speed instanceof Array && speed[dir]){
+                this.x+=speed[dir].x;
+                this.y+=speed[dir].y;
             }
-            //No direction speed
-            else {
-                this.x+=this.get('speed').x;
-                this.y+=this.get('speed').y;
+            //Single speed object with x,y
+            else if (speed && typeof speed.x === 'number'){
+                this.x+=speed.x;
+                this.y+=speed.y;
             }
         },
         //Add new functions to prototype
@@ -400,7 +402,7 @@ Unit.allGroundUnits=function(){
 Unit.count=function(){
     var count={ours:0,enemy:0};
     Unit.allUnits.forEach(function(chara){
-        if (chara.isEnemy) count.enemy++;
+        if (chara.isEnemy()) count.enemy++;
         else count.ours++;
     });
     return count;
@@ -593,15 +595,15 @@ var AttackableUnit=Unit.extends({
                             var enemies;
                             if (myself.AOE) {
                                 //Get possible targets
-                                if (myself.isEnemy) {
+                                if (myself.isEnemy()) {
                                     enemies=(myself.attackLimit)?((myself.attackLimit=="flying")?
-                                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings))
-                                        :(Unit.allOurUnits().concat(Building.ourBuildings));
+                                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings()))
+                                        :(Unit.allOurUnits().concat(Building.ourBuildings()));
                                 }
                                 else {
                                     enemies=(myself.attackLimit)?((myself.attackLimit=="flying")?
-                                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings))
-                                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings));
+                                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings()))
+                                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings()));
                                 }
                                 //Range filter
                                 switch (myself.AOE.type) {
@@ -723,14 +725,14 @@ var AttackableUnit=Unit.extends({
             //Initial
             var units,buildings,results=[];
             //Only ours
-            if (this.isEnemy) {
+            if (this.isEnemy()) {
                 units=Unit.allOurUnits();
-                buildings=Building.ourBuildings;
+                buildings=Building.ourBuildings();
             }
             //Only enemies
             else {
                 units=Unit.allEnemyUnits();
-                buildings=Building.enemyBuildings;
+                buildings=Building.enemyBuildings();
             }
             var myself=this;
             [units,buildings].forEach(function(charas){

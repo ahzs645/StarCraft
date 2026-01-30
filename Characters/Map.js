@@ -58,7 +58,7 @@ var Map={
             //Clear fog
             Map.fogCxt.globalCompositeOperation=Map.miniFogCxt.globalCompositeOperation='destination-out';
             //Draw fog
-            Unit.allOurUnits().concat(Building.ourBuildings).concat(addInObjs).forEach(function(chara){
+            Unit.allOurUnits().concat(Building.ourBuildings()).concat(addInObjs).forEach(function(chara){
                 //Clear fog on screen for our units inside screen
                 if (chara.insideScreen()){
                     Map.fogCxt.fillStyle='rgba(0,0,0,1)';
@@ -217,7 +217,7 @@ var Map={
         Building.allBuildings.concat(Unit.allUnits).forEach(function(chara){
             miniX=(130*chara.x/mapWidth)>>0;
             miniY=(130*chara.y/mapHeight)>>0;
-            Map.miniCxt.fillStyle=(chara.isEnemy)?'red':'lime';
+            Map.miniCxt.fillStyle=(chara.isEnemy())?'red':'lime';
             rectSize=(chara instanceof Building)?4:3;
             Map.miniCxt.fillRect(miniX,miniY,rectSize,rectSize);
         });

@@ -26,6 +26,8 @@ var Bullets=Gobj.extends({
         this.status="dead";
         //Fixed damage if be set
         if (props.damage!=null) this.damage=props.damage;
+        //Add to allBullets for rendering
+        Bullets.allBullets.push(this);
     },
     prototypePlus:{
         duration:500,//Will move for 500ms as default
@@ -46,15 +48,15 @@ var Bullets=Gobj.extends({
             var targets;
             if (owner.AOE) {
                 //Get possible targets
-                if (owner.isEnemy) {
+                if (owner.isEnemy()) {
                     targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
-                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings))
-                        :(Unit.allOurUnits().concat(Building.ourBuildings));
+                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings()))
+                        :(Unit.allOurUnits().concat(Building.ourBuildings()));
                 }
                 else {
                     targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
-                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings))
-                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings));
+                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings()))
+                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings()));
                 }
                 //Range filter
                 switch (owner.AOE.type) {
@@ -127,6 +129,8 @@ var Bullets=Gobj.extends({
         }
     }
 });
+//All bullets here for rendering
+Bullets.allBullets=[];
 Bullets.Spooge=Bullets.extends({
     constructorPlus:function(props){},
     prototypePlus:{
@@ -208,7 +212,7 @@ Bullets.Darts=Bullets.extends({
             var myself=this;
             var traceEnemies;
             //Get all possible enemies
-            if (owner.isEnemy) {
+            if (owner.isEnemy()) {
                 traceEnemies=(owner.attackLimit)?((owner.attackLimit=="flying")?
                     Unit.ourFlyingUnits:Unit.ourGroundUnits):Unit.allOurUnits();
             }

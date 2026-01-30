@@ -40,7 +40,7 @@ var Cheat={
                 }
                 break;
             case "full recovery":
-                Unit.allOurUnits().concat(Building.ourBuildings).forEach(function(chara){
+                Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
                     chara.life=chara.get('HP');
                     if (chara.SP) chara.shield=chara.get('SP');
                     if (chara.MP) chara.magic=chara.get('MP');
@@ -67,11 +67,11 @@ var Cheat={
                 else {
                     Cheat.oldCalculateDamageBy=[Unit.prototype.calculateDamageBy,Building.prototype.calculateDamageBy];
                     Unit.prototype.calculateDamageBy=function(enemyObj){
-                        if (enemyObj.isEnemy) return 0;
+                        if (enemyObj.isEnemy()) return 0;
                         else return Cheat.oldCalculateDamageBy[0].call(this,enemyObj);
                     };
                     Building.prototype.calculateDamageBy=function(enemyObj){
-                        if (enemyObj.isEnemy) return 0;
+                        if (enemyObj.isEnemy()) return 0;
                         else return Cheat.oldCalculateDamageBy[1].call(this,enemyObj);
                     };
                 }
@@ -93,12 +93,12 @@ var Cheat={
                 Game.win();
                 break;
             case "fuck your mother":
-                Unit.allEnemyUnits().concat(Building.enemyBuildings).forEach(function(chara){
+                Unit.allEnemyUnits().concat(Building.enemyBuildings()).forEach(function(chara){
                     chara.die();
                 });
                 break;
             case "fuck my asshole":
-                Unit.allOurUnits().concat(Building.ourBuildings).forEach(function(chara){
+                Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
                     chara.die();
                 });
                 break;
