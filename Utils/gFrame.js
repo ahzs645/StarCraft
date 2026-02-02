@@ -60,7 +60,9 @@ var _$=function(selector){
             //Attribute value filter
             if (filter.indexOf('=')!=-1){
                 var attr=filter.split('=')[0];
-                var val=eval(filter.split('=')[1]);
+                var rawVal=filter.split('=')[1].trim();
+                //Strip surrounding quotes if present
+                var val=(rawVal[0]==='\'' || rawVal[0]==='"')?rawVal.slice(1,-1):rawVal;
                 result=result.filter(function(item){
                     return item.getAttribute(attr)==val;
                 });

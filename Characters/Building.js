@@ -95,7 +95,7 @@ var Building=Gobj.extends({
                 }
             }
             else {
-                damage=((enemy.get('damage')-this.get('armor'))*percent)>>0;
+                damage=((this.calculateDamageBy(enemy)-this.get('armor'))*percent)>>0;
                 if (damage<1) damage=1;
                 this.life-=damage;
             }
