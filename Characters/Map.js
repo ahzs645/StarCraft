@@ -101,7 +101,7 @@ var Map={
     drawFog:function(){
         if (Map.fogFlag && Map.fogCxt && Map.miniFogCxt){
             //Reduce calculation frequency for performance, every 1 sec
-            if (Game._clock%10==0) Map.refreshFog();
+            if (Game.mainTick%10==0) Map.refreshFog();
             //Draw fog on main map, high frequency
             Game.frontCxt.drawImage(Map.fogCanvas,0,0);
         }

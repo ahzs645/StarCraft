@@ -591,45 +591,10 @@ var AttackableUnit=Unit.extends({
                             setTimeout(function(){
                                 myself.coolDown=true;
                             },myself.get('attackInterval'));
-                            //If AOE, init enemies
+                            //If AOE, init enemies using shared utility
                             var enemies;
                             if (myself.AOE) {
-                                //Get possible targets
-                                if (myself.isEnemy()) {
-                                    enemies=(myself.attackLimit)?((myself.attackLimit=="flying")?
-                                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings()))
-                                        :(Unit.allOurUnits().concat(Building.ourBuildings()));
-                                }
-                                else {
-                                    enemies=(myself.attackLimit)?((myself.attackLimit=="flying")?
-                                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings()))
-                                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings()));
-                                }
-                                //Range filter
-                                switch (myself.AOE.type) {
-                                    case "LINE":
-                                        //Calculate inter-points between enemy
-                                        var N=Math.ceil(myself.distanceFrom(enemy)/(myself.AOE.radius));
-                                        enemies=enemies.filter(function(chara){
-                                            for (var n=1;n<=N;n++){
-                                                var X=myself.posX()+n*(enemy.posX()-myself.posX())/N;
-                                                var Y=myself.posY()+n*(enemy.posY()-myself.posY())/N;
-                                                if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:myself.AOE.radius}) && !chara.isInvisible) {
-                                                    return true;
-                                                }
-                                            }
-                                            return false;
-                                        });
-                                        break;
-                                    //Default type is CIRCLE
-                                    case "CIRCLE":
-                                    default:
-                                        enemies=enemies.filter(function(chara){
-                                            return chara.insideCircle(
-                                                {centerX:enemy.posX(),centerY:enemy.posY(),radius:myself.AOE.radius})
-                                                && !chara.isInvisible;
-                                        })
-                                }
+                                enemies=Gobj.getAOETargets(myself,enemy);
                             }
                             //First facing to enemy
                             myself.faceTo(enemy);
@@ -741,7 +706,7 @@ var AttackableUnit=Unit.extends({
                 charas=charas.filter(function(chara){
                     return !chara.isInvisible && myself.canSee(chara) && myself.matchAttackLimit(chara);
                 }).sort(function(chara1,chara2){
-                    var X1=chara1.posX(),Y1=chara1.posY(),X2=chara2.posX(),Y2=chara1.posY();
+                    var X1=chara1.posX(),Y1=chara1.posY(),X2=chara2.posX(),Y2=chara2.posY();
                     return (X1-myX)*(X1-myX)+(Y1-myY)*(Y1-myY)-(X2-myX)*(X2-myX)-(Y2-myY)*(Y2-myY);
                 });
                 results=results.concat(charas);

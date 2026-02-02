@@ -92,17 +92,17 @@ var Cheat={
             case "your gg":
                 Game.win();
                 break;
-            case "fuck your mother":
+            case "medieval man":
                 Unit.allEnemyUnits().concat(Building.enemyBuildings()).forEach(function(chara){
                     chara.die();
                 });
                 break;
-            case "fuck my asshole":
+            case "food for thought":
                 Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
                     chara.die();
                 });
                 break;
-            case "liuda is god":
+            case "modify the phase variance":
                 Map.fogFlag=false;
                 Referee.winCondition=Referee.loseCondition=function(){
                     return false;

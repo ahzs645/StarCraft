@@ -160,7 +160,13 @@ Gobj.prototype.canSee=function(enemy){
 };
 Gobj.prototype.get=function(prop){
     //Currently only support upgrade for unit properties, no buildings
-    var result=eval('this.'+prop);//Can get A.B.C
+    //Navigate nested property path without eval
+    var parts=prop.split('.');
+    var result=this;
+    for (var i=0;i<parts.length;i++){
+        result=result[parts[i]];
+        if (result==null) return result;
+    }
     //ShareFlag is symbol for team sharing array, not speed matrix array
     if ((result instanceof Array) && result.shareFlag) return result[Number(this.isEnemy())];
     else return result;
@@ -256,3 +262,42 @@ Gobj.prototype.evolveTo=function(charaType,burstArr){
 };
 //This buffer makes invisible units visible
 Gobj.detectorBuffer={isInvisible:false};
+//Shared AOE target filtering logic used by both melee attacks and bullet bursts
+Gobj.getAOETargets=function(owner,target){
+    var targets;
+    //Get possible targets based on team and attack limit
+    if (owner.isEnemy()) {
+        targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
+            Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings()))
+            :(Unit.allOurUnits().concat(Building.ourBuildings()));
+    }
+    else {
+        targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
+            Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings()))
+            :(Unit.allEnemyUnits().concat(Building.enemyBuildings()));
+    }
+    //Range filter by AOE type
+    switch (owner.AOE.type) {
+        case "LINE":
+            var N=Math.ceil(owner.distanceFrom(target)/(owner.AOE.radius));
+            targets=targets.filter(function(chara){
+                for (var n=1;n<=N;n++){
+                    var X=owner.posX()+n*(target.posX()-owner.posX())/N;
+                    var Y=owner.posY()+n*(target.posY()-owner.posY())/N;
+                    if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:owner.AOE.radius}) && !chara.isInvisible) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            break;
+        case "CIRCLE":
+        default:
+            targets=targets.filter(function(chara){
+                return chara.insideCircle(
+                    {centerX:target.posX(),centerY:target.posY(),radius:owner.AOE.radius})
+                    && !chara.isInvisible;
+            });
+    }
+    return targets;
+};

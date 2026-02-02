@@ -34,7 +34,7 @@ var Game={
         if (chara instanceof Gobj){
             //Add into allSelected if not included
             if (Game.allSelected.indexOf(chara)==-1) {
-                if (override) Game.allSelected=chara;
+                if (override) Game.allSelected=[chara];
                 else Game.allSelected.push(chara);
                 chara.selected=true;
             }
@@ -150,7 +150,7 @@ var Game={
         sourceLoader.load("img",Game.CDN+"img/Charas/Scout.png","Scout");
         sourceLoader.load("img",Game.CDN+"img/Charas/Carrier.png","Carrier");
         sourceLoader.load("img",Game.CDN+"img/Charas/Corsair.png","Corsair");
-        //Neuture
+        //Neutral
         sourceLoader.load("img",Game.CDN+"img/Charas/Ragnasaur.png","Ragnasaur");
         sourceLoader.load("img",Game.CDN+"img/Charas/Rhynsdon.png","Rhynsdon");
         sourceLoader.load("img",Game.CDN+"img/Charas/Ursadon.png","Ursadon");
@@ -238,8 +238,8 @@ var Game={
             //Bind controller
             mouseController.toControlAll();//Can control all units
             keyController.start();//Start monitor
-            Game.pauseWhenHide();//Hew H5 feature:Page Visibility
-            Game.initIndexDB();//Hew H5 feature:Indexed DB
+            Game.pauseWhenHide();//HTML5 feature: Page Visibility
+            Game.initIndexDB();//HTML5 feature: Indexed DB
             Game.animation();
         }
     },
@@ -248,6 +248,8 @@ var Game={
         for (var N=0;N<Game.playerNum;N++){
             result.push(typeof(prop)=='object'?(_$.clone(prop)):prop);
         }
+        //Mark as team-shared array to distinguish from speed matrix arrays
+        result.shareFlag=true;
         return result;
     },
     //Do we need this because we only support Zerg vs Terran vs Protoss?
@@ -276,7 +278,13 @@ var Game={
             unitType.upgrade=function(prop,value,team){
                 switch (team){
                     case 0:case 1:case 2:case 3:case 4:case 5:case 6:case 7:
-                    eval('unitType.prototype.'+prop)[team]=value;
+                    //Navigate nested property path without eval
+                    var parts=prop.split('.');
+                    var target=unitType.prototype;
+                    for (var i=0;i<parts.length;i++){
+                        target=target[parts[i]];
+                    }
+                    target[team]=value;
                     break;
                     default:
                         unitType.prototype[prop]=value;
@@ -343,12 +351,9 @@ var Game={
         else Game.changeSelectedTo({});
         Game.addIntoAllSelected(inRectUnits,true);
     },
-    getSelectedOne:function(clickX,clickY,isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter){
-        var distance=function(chara){
-            return (clickX-chara.posX())*(clickX-chara.posX())+(clickY-chara.posY())*(clickY-chara.posY());//Math.pow2
-        };
-        //Initial
-        var selectedOne={},charas=[];
+    //Shared filter logic for entity selection
+    filterEntities:function(isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter){
+        var charas=[];
         switch (unitBuildingFilter){
             case true:
                 charas=Unit.allUnits;
@@ -380,12 +385,18 @@ var Game={
                 return chara.isFlying==isFlyingFilter;
             });
         }
-        //customFilter is filter function
         if (customFilter!=null){
             charas=charas.filter(customFilter);
         }
+        return charas;
+    },
+    getSelectedOne:function(clickX,clickY,isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter){
+        var distance=function(chara){
+            return (clickX-chara.posX())*(clickX-chara.posX())+(clickY-chara.posY())*(clickY-chara.posY());//Math.pow2
+        };
+        var charas=Game.filterEntities(isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter);
         //Find nearest one
-        selectedOne=charas.filter(function(chara){
+        var selectedOne=charas.filter(function(chara){
             return chara.status!='dead' && chara.includePoint(clickX,clickY);
         }).sort(function(chara1,chara2){
             return distance(chara1)-distance(chara2);
@@ -394,45 +405,9 @@ var Game={
         return selectedOne;
     },
     getInRangeOnes:function(clickX,clickY,range,isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter){
-        //Initial
-        var selectedOnes=[],charas=[];
-        switch (unitBuildingFilter){
-            case true:
-                charas=Unit.allUnits;
-                break;
-            case false:
-                charas=Building.allBuildings;
-                break;
-            default:
-                charas=Unit.allUnits.concat(Building.allBuildings);
-        }
-        switch (isEnemyFilter){
-            case true:case false:
-                charas=charas.filter(function(chara){
-                    return chara.isEnemy()==isEnemyFilter;
-                });
-                break;
-            case 0:case 1:case 2:case 3:case 4:case 5:case 6:case 7:
-                charas=charas.filter(function(chara){
-                    return chara.team==isEnemyFilter;
-                });
-                break;
-            case '0':case '1':case '2':case '3':case '4':case '5':case '6':case '7':
-                charas=charas.filter(function(chara){
-                    return chara.team!=isEnemyFilter;
-                });
-        }
-        if (isFlyingFilter!=null) {
-            charas=charas.filter(function(chara){
-                return chara.isFlying==isFlyingFilter;
-            });
-        }
-        //customFilter is filter function
-        if (customFilter!=null){
-            charas=charas.filter(customFilter);
-        }
+        var charas=Game.filterEntities(isEnemyFilter,unitBuildingFilter,isFlyingFilter,customFilter);
         //Find in range ones
-        selectedOnes=charas.filter(function(chara){
+        var selectedOnes=charas.filter(function(chara){
             return chara.status!='dead' && chara.insideSquare({centerX:clickX,centerY:clickY,radius:range});
         });
         return selectedOnes;
@@ -1071,7 +1046,7 @@ var Game={
         },interval);
     },
     showMessage:function(){
-        //Clossure timer
+        //Closure timer
         var _timer=0;
         return function(msg,interval){
             //Default interval
@@ -1088,7 +1063,7 @@ var Game={
     }(),
     //Return from 0 to 0.99
     getNextRandom:(function(){
-        //Clossure variable and function
+        //Closure variable and function
         var rands=[];
         var getRands=function(){
             //Use current tick as seed
@@ -1118,14 +1093,15 @@ var Game={
         $('#GamePlay>canvas').attr('height',Game.VBOUND-Game.infoBox.height+5);//Canvas height adjust
         //Resize panel_Info
         $('div.panel_Info')[0].style.width=((Game.HBOUND-295)+'px');
-        if (Map.ready){
+        if (Map.getCurrentMap()){
             //Update map inside-stroke size
             Map.insideStroke.width=(130*Game.HBOUND/Map.getCurrentMap().width)>>0;
             Map.insideStroke.height=(130*Game.VBOUND/Map.getCurrentMap().height)>>0;
             //Redraw background
-            Map.drawBg();
+            Map.draw();
             //Need re-calculate fog immediately
-            Map.drawFogAndMinimap();
+            Map.refreshFog();
+            Map.refreshMiniMap();
         }
     },
     getCurrentTs:function(){

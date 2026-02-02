@@ -233,7 +233,7 @@ var Multiplayer={
                                             Upgrade[name].effect(team);
                                             delete owner.processing;
                                             if (team==Game.team){
-                                                Referee.voice('upgrade')[Game.race.selected].play();
+                                                Referee.voice.upgrade[Game.race.selected].play();
                                                 Game.refreshInfo();
                                                 Game.showMessage('Upgrade complete');
                                             }
@@ -294,7 +294,7 @@ var Multiplayer={
                                             if (chara && Resource.paypal.call(chara,Resource.getCost(unitType))){
                                                 //Evolve as egg
                                                 var egg;
-                                                //Clossure: which base larvas belong to
+                                                //Closure: which base larvas belong to
                                                 var base=chara.owner;
                                                 //Evolve as cocoon
                                                 if (exceptions.indexOf(unitType)!=-1){

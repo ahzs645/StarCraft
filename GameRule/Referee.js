@@ -45,7 +45,7 @@ var Referee={
     },
     judgeArbiter:function(){
         //Every 0.4 sec
-        if (Game._clock%4==0){
+        if (Game.mainTick%4==0){
             //Same Arbiter buffer reference
             var arbiterBuffer=Protoss.Arbiter.prototype.bufferObj;
             var myArbiters=Unit.ourFlyingUnits.filter(function(chara){
@@ -86,7 +86,7 @@ var Referee={
     //detectorBuffer are reverse of arbiterBuffer
     judgeDetect:function(){
         //Every 0.4 sec
-        if (Game._clock%4==0){
+        if (Game.mainTick%4==0){
             //Same detector buffer reference
             var detectorBuffer=Gobj.detectorBuffer;
             var ourDetectors=Unit.allOurUnits().concat(Building.ourBuildings()).filter(function(chara){
@@ -149,7 +149,7 @@ var Referee={
     },
     judgeRecover:function(){
         //Every 1 sec
-        if (Game._clock%10==0){
+        if (Game.mainTick%10==0){
             Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
                 if (chara.recover) chara.recover();
             });
@@ -157,7 +157,7 @@ var Referee={
     },
     judgeDying:function(){
         //Kill die survivor every 1 sec
-        if (Game._clock%10==0){
+        if (Game.mainTick%10==0){
             Unit.allUnits.concat(Building.allBuildings).filter(function(chara){
                 return chara.life<=0 && chara.status!='dead';
             }).forEach(function(chara){
@@ -290,13 +290,13 @@ var Referee={
     },
     monitorMiniMap:function(){
         //Every 1 sec
-        if (Game._clock%10==0){
+        if (Game.mainTick%10==0){
             Map.refreshMiniMap();
         }
     },
     coverFog:function(){
         /*//Every 1 sec
-        if (Game._clock%10==0){
+        if (Game.mainTick%10==0){
             Map.drawFog();
         }*/
         Map.drawFog();
@@ -332,7 +332,7 @@ var Referee={
     },
     addLarva:function(){
         //Every 20 sec
-        if (Game._clock%200==0){
+        if (Game.mainTick%200==0){
             Building.allBuildings.filter(function(chara){
                 return chara.produceLarva;
             }).forEach(function(chara){

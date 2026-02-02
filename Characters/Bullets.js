@@ -44,45 +44,10 @@ var Bullets=Gobj.extends({
             this.die();
             //Filter out magic bullet with fixed destination
             if (!(target instanceof Gobj)) return;
-            //Init targets if AOE
+            //Init targets if AOE using shared utility
             var targets;
             if (owner.AOE) {
-                //Get possible targets
-                if (owner.isEnemy()) {
-                    targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
-                        Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings()))
-                        :(Unit.allOurUnits().concat(Building.ourBuildings()));
-                }
-                else {
-                    targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
-                        Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings()))
-                        :(Unit.allEnemyUnits().concat(Building.enemyBuildings()));
-                }
-                //Range filter
-                switch (owner.AOE.type) {
-                    case "LINE":
-                        //Calculate inter-points between enemy
-                        var N=Math.ceil(owner.distanceFrom(target)/(owner.AOE.radius));
-                        targets=targets.filter(function(chara){
-                            for (var n=1;n<=N;n++){
-                                var X=owner.posX()+n*(target.posX()-owner.posX())/N;
-                                var Y=owner.posY()+n*(target.posY()-owner.posY())/N;
-                                if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:owner.AOE.radius}) && !chara.isInvisible) {
-                                    return true;
-                                }
-                            }
-                            return false;
-                        });
-                        break;
-                    //Default type is CIRCLE
-                    case "CIRCLE":
-                    default:
-                        targets=targets.filter(function(chara){
-                            return chara.insideCircle(
-                                {centerX:target.posX(),centerY:target.posY(),radius:owner.AOE.radius})
-                                && !chara.isInvisible;
-                        });
-                }
+                targets=Gobj.getAOETargets(owner,target);
             }
             if (this.burstEffect) {
                 //Show burst effect on target
@@ -102,8 +67,8 @@ var Bullets=Gobj.extends({
                 if (owner.AOE) {
                     var myself=this;
                     targets.forEach(function(chara){
-                        if (myself.damage!=null) target.getDamageBy(myself.damage);
-                        else target.getDamageBy(owner);
+                        if (myself.damage!=null) chara.getDamageBy(myself.damage);
+                        else chara.getDamageBy(owner);
                         chara.reactionWhenAttackedBy(owner);
                     })
                 }
