@@ -168,7 +168,10 @@ Gobj.prototype.get=function(prop){
         if (result==null) return result;
     }
     //ShareFlag is symbol for team sharing array, not speed matrix array
-    if ((result instanceof Array) && result.shareFlag) return result[Number(this.isEnemy())];
+    if ((result instanceof Array) && result.shareFlag) {
+        var teamIndex=(this.team!=null && result[this.team]!==undefined)?this.team:Number(this.isEnemy());
+        return result[teamIndex];
+    }
     else return result;
 };
 Gobj.prototype.addBuffer=function(bufferObj,onAll){

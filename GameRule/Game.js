@@ -211,10 +211,10 @@ var Game={
         Game.layerSwitchTo("GameStart");
         //Init level selector
         for (var level=1; level<=Levels.length; level++){
-            $('.levelSelectionBg').append("<div class='levelItem'>" +
-                "<input type='radio' value='"+level+"' name='levelSelect'>"+
+            $('.levelSelectionBg').append("<label class='levelItem'>" +
+                "<input type='radio' value='"+level+"' name='levelSelect' />"+
                 (Levels[level-1].label?(Levels[level-1].label):("Level "+level))
-                +"</input></div>");
+                +"</label>");
         }
         //Wait for user select level and play game
         $('input[name="levelSelect"]').click(function(){

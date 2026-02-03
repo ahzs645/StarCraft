@@ -82,17 +82,21 @@ div.GameLayer[status="button"]{
 }
 .levelItem {
     width: 300px;
-    height: 30px;
+    height: 40px;
     border: 3px solid yellow;
     margin:0 auto -3px auto;
-    padding-left:100px;
+    padding-left:80px;
     background-color: blue;
     font: bold 24px Verdana, Georgia, Arial;
     color: red;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    box-sizing:border-box;
 }
 .levelItem input[type="radio"] {
     cursor: pointer;
-    margin-right:5px;
+    margin-right:8px;
 }
 div#GamePlay div {
     position:absolute;
