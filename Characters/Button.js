@@ -4,6 +4,9 @@ var Button={
     reset:function(){
         Game.changeSelectedTo(Game.selectedUnit);
     },
+    refreshButtons:function(){
+        Button.equipButtonsFor(Game.selectedUnit);
+    },
     //Equip all buttons for unit
     equipButtonsFor:function(chara){
         //Clear all buttons
@@ -679,10 +682,10 @@ var Button={
                 mouseController.rightClick(event);
                 break;
             case 'attack':
-                mouseController.rightClick(event,true);
+                mouseController.rightClick(event,true,'attack');
                 break;
             case 'patrol':
-                mouseController.rightClick(event,true);
+                mouseController.rightClick(event,true,'patrol');
                 break;
             default:
                 if (typeof(Button.callback)=='function'){

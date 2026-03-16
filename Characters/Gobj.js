@@ -287,7 +287,7 @@ Gobj.getAOETargets=function(owner,target){
                 for (var n=1;n<=N;n++){
                     var X=owner.posX()+n*(target.posX()-owner.posX())/N;
                     var Y=owner.posY()+n*(target.posY()-owner.posY())/N;
-                    if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:owner.AOE.radius}) && !chara.isInvisible) {
+                    if (chara.insideCircle({centerX:X>>0,centerY:Y>>0,radius:owner.AOE.radius}) && !chara['isInvisible'+owner.team]) {
                         return true;
                     }
                 }
@@ -299,7 +299,7 @@ Gobj.getAOETargets=function(owner,target){
             targets=targets.filter(function(chara){
                 return chara.insideCircle(
                     {centerX:target.posX(),centerY:target.posY(),radius:owner.AOE.radius})
-                    && !chara.isInvisible;
+                    && !chara['isInvisible'+owner.team];
             });
     }
     return targets;

@@ -1,6 +1,8 @@
 var mouseController={
     down:false,
     drag:false,
+    mouseX:0,
+    mouseY:0,
     startPoint:{x:0,y:0},
     endPoint:{x:0,y:0},
     isMultiSelect:function(){
@@ -21,7 +23,7 @@ var mouseController={
             //Find selected one, convert position
             var selectedOne=Game.getSelectedOne(clickX+Map.offsetX,clickY+Map.offsetY);
             //Cannot select enemy invisible unit
-            if (selectedOne.isInvisible && selectedOne.isEnemy()) return;
+            if ((selectedOne instanceof Gobj) && selectedOne['isInvisible'+Game.team] && selectedOne.isEnemy()) return;
             //Single select will unselect all units and only choose selected one
             //Multi select will keep selected status and do nothing
             if (!mouseController.isMultiSelect())
@@ -29,7 +31,7 @@ var mouseController={
             //If has selected one
             if (selectedOne instanceof Gobj) {
                 //Sound effect
-                selectedOne.sound.selected.play();
+                if (!(selectedOne.isEnemy())) selectedOne.sound.selected.play();
                 //Cannot multiSelect with enemy
                 if (selectedOne.isEnemy() || (Game.selectedUnit instanceof Gobj && Game.selectedUnit.isEnemy()))
                     Game.unselectAll();
@@ -50,7 +52,7 @@ var mouseController={
             Button.execute(event);
         }
     },
-    rightClick:function(event,unlock){
+    rightClick:function(event,unlock,btn){
         //Mouse at (clickX,clickY)
         var offset=$('#frontCanvas').offset();
         var clickX=event.pageX-offset.left;
@@ -58,59 +60,61 @@ var mouseController={
         //Intercept event inside infoBox
         if (clickY>Game.infoBox.y) return;
         //Show right click cursor
-        new Burst.RightClickCursor({x:clickX+Map.offsetX,y:clickY+Map.offsetY});
+        var pos={x:clickX+Map.offsetX,y:clickY+Map.offsetY};
+        new Burst.RightClickCursor(pos);
+        var charas=Game.allSelected.filter(function(chara){
+            return chara.team==Game.team && chara.status!="dead";
+        });
+        mouseController.rightClickHandler(charas,pos,unlock,btn || Button.callback);
+    },
+    rightClickHandler:function(charas,pos,unlock,btn){
         //Find selected one or nothing
-        var selectedEnemy=Game.getSelectedOne(clickX+Map.offsetX,clickY+Map.offsetY,true);//isEnemy
-        Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
-            //Cannot control dead man
-            if (chara.status=="dead") return;
-            //Control chara moving if it's selected
-            if (chara.selected) {
-                //Sound effect
-                if (chara.sound.moving) chara.sound.moving.play();
-                //Interrupt old destination routing
-                if (chara.destination) {
-                    //Break possible dead lock
-                    if (chara.destination.next) chara.destination.next=null;
-                    delete chara.destination;
+        var selectedEnemy=(charas.length>0)?Game.getSelectedOne(pos.x,pos.y,charas[0].team.toString()):null;
+        charas.forEach(function(chara){
+            //Sound effect
+            if (!chara.isEnemy() && chara.sound.moving) chara.sound.moving.play();
+            //Interrupt old destination routing
+            if (chara.destination) {
+                //Break possible dead lock
+                if (chara.destination.next) chara.destination.next=null;
+                delete chara.destination;
+            }
+            //Cancel possible hold
+            if (chara.hold) {
+                delete chara.AI;
+                delete chara.findNearbyTargets;
+                delete chara.hold;
+                Button.refreshButtons();
+            }
+            //Unit cannot attack will always choose move mode
+            var attackOrMove=(chara.attack)?(selectedEnemy instanceof Gobj):false;
+            //Attack mode
+            if (attackOrMove) {
+                if (chara.cannotMove() && !(chara.isInAttackRange(selectedEnemy))) return;
+                //Intercept invisible enemy
+                if (selectedEnemy['isInvisible'+chara.team]) {
+                    if (!chara.isEnemy()) Referee.voice('pError').play();
+                    return;
                 }
-                //Cancel possible hold
-                if (chara.hold) {
-                    delete chara.AI;
-                    delete chara.findNearbyTargets;
-                    delete chara.hold;
-                    Button.reset();
+                chara.targetLock=true;
+                chara.attack(selectedEnemy);
+            }
+            //Move mode
+            else {
+                if (chara.cannotMove()) return;
+                //Only attackable units can stop attack
+                if (chara.attack) chara.stopAttack();
+                //Lock destination by default
+                chara.targetLock=!unlock;
+                chara.moveTo(pos.x,pos.y);
+                //Record destination
+                if (btn=='attack') {
+                    chara.destination={x:pos.x,y:pos.y};
                 }
-                //Unit cannot attack will always choose move mode
-                var attackOrMove=(chara.attack)?(selectedEnemy instanceof Gobj):false;
-                //Attack mode
-                if (attackOrMove) {
-                    if (chara.cannotMove() && !(chara.isInAttackRange(selectedEnemy))) return;
-                    //Intercept invisible enemy
-                    if (selectedEnemy.isInvisible) {
-                        Referee.voice.pError.play();
-                        return;
-                    }
-                    chara.targetLock=true;
-                    chara.attack(selectedEnemy);
-                }
-                //Move mode
-                else {
-                    if (chara.cannotMove()) return;
-                    //Only attackable units can stop attack
-                    if (chara.attack) chara.stopAttack();
-                    //Lock destination by default
-                    chara.targetLock=!unlock;
-                    chara.moveTo(clickX+Map.offsetX,clickY+Map.offsetY);
-                    //Record destination
-                    if (Button.callback=='attack') {
-                        chara.destination={x:clickX+Map.offsetX,y:clickY+Map.offsetY};
-                    }
-                    if (Button.callback=='patrol') {
-                        //Patrol dead lock
-                        chara.destination={x:clickX+Map.offsetX,y:clickY+Map.offsetY};
-                        chara.destination.next={x:chara.posX(),y:chara.posY(),next:chara.destination};
-                    }
+                if (btn=='patrol') {
+                    //Patrol dead lock
+                    chara.destination={x:pos.x,y:pos.y};
+                    chara.destination.next={x:chara.posX(),y:chara.posY(),next:chara.destination};
                 }
             }
         });
@@ -158,6 +162,8 @@ var mouseController={
         //Mouse click start
         $('#frontCanvas')[0].onmousedown=function(event){
             event.preventDefault();
+            //Do not allow rectangular-multi-select with right click
+            if (event.which===3) return;
             if (!mouseController.down) {
                 //Mouse at (clickX,clickY)
                 var clickX=event.pageX-$('#frontCanvas').offset().left;
@@ -183,14 +189,8 @@ var mouseController={
         //Global client refresh map
         window.onmousemove=function(event){
             event.preventDefault();
-            //Mouse at (clickX,clickY)
-            var clickX=event.clientX;
-            var clickY=event.clientY;
-            //Refresh
-            if (clickX<Map.triggerMargin) Map.needRefresh="LEFT";
-            if (clickX>(Game.HBOUND-Map.triggerMargin)) Map.needRefresh="RIGHT";
-            if (clickY<Map.triggerMargin) Map.needRefresh="TOP";
-            if (clickY>(Game.VBOUND-Map.triggerMargin)) Map.needRefresh="BOTTOM";
+            mouseController.mouseX=event.clientX;
+            mouseController.mouseY=event.clientY;
         };
         //Mouse click end
         $('#frontCanvas')[0].onmouseup=function(event){

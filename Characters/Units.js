@@ -529,7 +529,7 @@ var AttackableUnit=Unit.extends({
         },
         attack:function(enemy){
             //Cannot attack invisible unit or unit who mismatch your attack type
-            if (enemy.isInvisible || !(this.matchAttackLimit(enemy))) {
+            if (enemy['isInvisible'+this.team] || !(this.matchAttackLimit(enemy))) {
                 Referee.voice.pError.play();
                 this.stopAttack();
                 return;
@@ -578,7 +578,7 @@ var AttackableUnit=Unit.extends({
                 var myself=this;
                 var attackFrame=function(){
                     //If enemy already dead or becomes invisible or we just miss enemy
-                    if (enemy.status=="dead" || enemy.isInvisible || myself.isMissingTarget()) {
+                    if (enemy.status=="dead" || enemy['isInvisible'+myself.team] || myself.isMissingTarget()) {
                         myself.stopAttack();
                         myself.dock();
                     }
@@ -704,7 +704,7 @@ var AttackableUnit=Unit.extends({
                 var myX=myself.posX();
                 var myY=myself.posY();
                 charas=charas.filter(function(chara){
-                    return !chara.isInvisible && myself.canSee(chara) && myself.matchAttackLimit(chara);
+                    return !chara['isInvisible'+myself.team] && myself.canSee(chara) && myself.matchAttackLimit(chara);
                 }).sort(function(chara1,chara2){
                     var X1=chara1.posX(),Y1=chara1.posY(),X2=chara2.posX(),Y2=chara2.posY();
                     return (X1-myX)*(X1-myX)+(Y1-myY)*(Y1-myY)-(X2-myX)*(X2-myX)-(Y2-myY)*(Y2-myY);
@@ -782,7 +782,7 @@ var AttackableUnit=Unit.extends({
             }
             //AI when attacked by enemy
             if (!onlyDamage){
-                if (this.attack && this.matchAttackLimit(enemy) && !enemy.isInvisible){
+                if (this.attack && this.matchAttackLimit(enemy) && !enemy['isInvisible'+this.team]){
                     if (this.isIdle()) {
                         //Will hatred toward enemy
                         this.attack(enemy);

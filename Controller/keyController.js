@@ -81,7 +81,7 @@ var keyController={
                     break;
             }
         };
-        window.onkeyup=function(){
+        window.onkeyup=function(event){
             switch (event.keyCode){
                 //Press SHIFT up
                 case 16:

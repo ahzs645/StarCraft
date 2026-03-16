@@ -1094,6 +1094,8 @@ var Game={
         //Resize panel_Info
         $('div.panel_Info')[0].style.width=((Game.HBOUND-295)+'px');
         if (Map.getCurrentMap()){
+            Map.fogCanvas.width=Game.HBOUND;
+            Map.fogCanvas.height=Game.VBOUND-Game.infoBox.height+5;
             //Update map inside-stroke size
             Map.insideStroke.width=(130*Game.HBOUND/Map.getCurrentMap().width)>>0;
             Map.insideStroke.height=(130*Game.VBOUND/Map.getCurrentMap().height)>>0;

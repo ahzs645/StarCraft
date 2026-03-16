@@ -1,15 +1,19 @@
 var Referee={
     //Tasks to run each game frame
-    tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan','judgeWinLose','alterSelectionMode'],
+    tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan',
+        'monitorMiniMap','coverFog','judgeWinLose','alterSelectionMode'],
     ourDetectedUnits:[],//Detected enemies
     enemyDetectedUnits:[],//Detected ours
     ourUnderArbiterUnits:[],
     enemyUnderArbiterUnits:[],
     _pos:[[-1,0],[1,0],[0,-1],[0,1]],//Collision avoid
-    voice:{
-        pError:new Audio('bgm/PointError.wav'),
-        button:new Audio('bgm/Button.wav'),
-        resource:{
+    voice:(function(){
+        var voice=function(name){
+            return voice[name];
+        };
+        voice.pError=new Audio('bgm/PointError.wav');
+        voice.button=new Audio('bgm/Button.wav');
+        voice.resource={
             Zerg:{
                 mine:new Audio('bgm/mine.Zerg.wav'),
                 gas:new Audio('bgm/gas.Zerg.wav'),
@@ -28,13 +32,14 @@ var Referee={
                 man:new Audio('bgm/man.Protoss.wav'),
                 magic:new Audio('bgm/magic.Protoss.wav')
             }
-        },
-        upgrade:{
+        };
+        voice.upgrade={
             Zerg:new Audio('bgm/upgrade.Zerg.wav'),
             Terran:new Audio('bgm/upgrade.Terran.wav'),
             Protoss:new Audio('bgm/upgrade.Protoss.wav')
-        }
-    },
+        };
+        return voice;
+    })(),
     winCondition:function(){
         //By default: All our units and buildings are killed
         return (Unit.allEnemyUnits().length==0 && Building.enemyBuildings().length==0);
@@ -105,7 +110,7 @@ var Referee={
             ourDetectors.forEach(function(detector){
                 //Find targets: enemy invisible units inside my detector sight
                 var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),true,true,null,function(chara){
-                    return chara.isInvisible;
+                    return chara['isInvisible'+detector.team];
                 });
                 Referee.ourDetectedUnits=Referee.ourDetectedUnits.concat(targets);
             });
@@ -113,7 +118,7 @@ var Referee={
             enemyDetectors.forEach(function(detector){
                 //Find targets: our invisible units inside enemy detector sight
                 var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),false,true,null,function(chara){
-                    return chara.isInvisible;
+                    return chara['isInvisible'+detector.team];
                 });
                 Referee.enemyDetectedUnits=Referee.enemyDetectedUnits.concat(targets);
             });
@@ -304,7 +309,7 @@ var Referee={
     alterSelectionMode:function(){
         //GC after some user changes
         $.extend([],Game.allSelected).forEach(function(chara){
-            if (chara.status=='dead' || (chara.isInvisible && chara.isEnemy()))
+            if (chara.status=='dead' || (chara['isInvisible'+Game.team] && chara.isEnemy()))
                 Game.allSelected.splice(Game.allSelected.indexOf(chara),1);
         });
         //Alter info UI: Multi selection mode

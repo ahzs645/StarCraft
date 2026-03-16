@@ -25,6 +25,8 @@ var Map={
         Map.insideStroke.height=(130*Game.VBOUND/Map.getCurrentMap().height)>>0;
         //Init fog relative
         Map.fogCxt=Map.fogCanvas.getContext('2d');
+        Map.fogCanvas.width=Game.HBOUND;
+        Map.fogCanvas.height=Game.VBOUND-Game.infoBox.height+5;
         Map.miniFogCanvas.width=Map.miniFogCanvas.height=130;
         Map.miniFogCxt=Map.miniFogCanvas.getContext('2d');
         Map.shadowCanvas.width=Map.shadowCanvas.height=100;
@@ -49,10 +51,10 @@ var Map={
             Map.miniFogCxt.fillRect(0,0,130,130);
             //Other things have sight
             var parasitedEnemies=Unit.allEnemyUnits().filter(function(chara){
-                return chara.buffer.Parasite;
+                return chara.buffer.Parasite==Game.team;
             });
             var scannerSweeps=Burst.allEffects.filter(function(anime){
-                return Animation.getName(anime)=="ScannerSweep";
+                return Animation.getName(anime)=="ScannerSweep" && anime.team==Game.team;
             });
             var addInObjs=parasitedEnemies.concat(scannerSweeps);
             //Clear fog
@@ -215,6 +217,7 @@ var Map={
         //Re-draw mini-map points
         var miniX,miniY,rectSize;
         Building.allBuildings.concat(Unit.allUnits).forEach(function(chara){
+            if (chara['isInvisible'+Game.team] && chara.isEnemy()) return;
             miniX=(130*chara.x/mapWidth)>>0;
             miniY=(130*chara.y/mapHeight)>>0;
             Map.miniCxt.fillStyle=(chara.isEnemy())?'red':'lime';
