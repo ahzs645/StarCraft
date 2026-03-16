@@ -296,9 +296,12 @@ var Game={
         Protoss.Reaver.prototype.scarabCapacity=Game.getPropArray(Protoss.Reaver.prototype.scarabCapacity);
         Referee.underArbiterUnits=Game.getPropArray([]);
         Referee.detectedUnits=Game.getPropArray([]);
+        Gobj.detectorBuffer=[];
         for (var N=0;N<Game.playerNum;N++){
             //Initial detector buffer
-            Gobj.detectorBuffer['isInvisible'+N]=false;
+            var buffer={};
+            buffer['isInvisible'+N]=false;
+            Gobj.detectorBuffer.push(buffer);
             //Initial arbiter buffer
             Protoss.Arbiter.prototype.bufferObj['isInvisible'+N]=true;
         }

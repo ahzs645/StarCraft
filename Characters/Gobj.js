@@ -288,7 +288,7 @@ Gobj.prototype.evolveTo=function(charaType,burstArr){
     return newTypeChara;
 };
 //This buffer makes invisible units visible
-Gobj.detectorBuffer={isInvisible:false};
+Gobj.detectorBuffer=[];
 //Shared AOE target filtering logic used by both melee attacks and bullet bursts
 Gobj.getAOETargets=function(owner,target){
     var targets;

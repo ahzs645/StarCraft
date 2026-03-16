@@ -2,10 +2,8 @@ var Referee={
     //Tasks to run each game frame
     tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan',
         'monitorMiniMap','coverFog','alterSelectionMode','judgeBuildingInjury','judgeWinLose','saveReplaySnapshot'],
-    ourDetectedUnits:[],//Detected enemies
-    enemyDetectedUnits:[],//Detected ours
-    ourUnderArbiterUnits:[],
-    enemyUnderArbiterUnits:[],
+    detectedUnits:[],
+    underArbiterUnits:[],
     _pos:[[-1,0],[1,0],[0,-1],[0,1]],//Collision avoid
     voice:(function(){
         var voice=function(name){
@@ -51,40 +49,35 @@ var Referee={
     judgeArbiter:function(){
         //Every 0.4 sec
         if (Game.mainTick%4==0){
-            //Same Arbiter buffer reference
+            //Special skill: make nearby units invisible
             var arbiterBuffer=Protoss.Arbiter.prototype.bufferObj;
-            var myArbiters=Unit.ourFlyingUnits.filter(function(chara){
-                return chara.name=="Arbiter";
-            });
-            var enemyArbiters=Unit.enemyFlyingUnits.filter(function(chara){
-                return chara.name=="Arbiter";
+            var allArbiters=Game.getPropArray([]);
+            Unit.allUnits.forEach(function(chara){
+                if (chara.name=='Arbiter') allArbiters[chara.team].push(chara);
             });
             //Clear old units' Arbiter buffer
-            Referee.ourUnderArbiterUnits.concat(Referee.enemyUnderArbiterUnits).forEach(function(chara){
-                chara.removeBuffer(arbiterBuffer);
-            });
-            Referee.ourUnderArbiterUnits=[];
-            Referee.enemyUnderArbiterUnits=[];
-            //Find new under arbiter units
-            myArbiters.forEach(function(arbiter){
-                //Find targets: our units inside Arbiter sight, not including Arbiter
-                var targets=Game.getInRangeOnes(arbiter.posX(),arbiter.posY(),arbiter.get('sight'),false,true,null,function(chara){
-                    return myArbiters.indexOf(chara)==-1;
+            Referee.underArbiterUnits.forEach(function(charas){
+                charas.forEach(function(chara){
+                    chara.removeBuffer(arbiterBuffer);
                 });
-                Referee.ourUnderArbiterUnits=Referee.ourUnderArbiterUnits.concat(targets);
             });
-            $.unique(Referee.ourUnderArbiterUnits);
-            enemyArbiters.forEach(function(arbiter){
-                //Find targets: enemy units inside Arbiter sight
-                var targets=Game.getInRangeOnes(arbiter.posX(),arbiter.posY(),arbiter.get('sight'),true,true,null,function(chara){
-                    return enemyArbiters.indexOf(chara)==-1;
+            Referee.underArbiterUnits=Game.getPropArray([]);
+            allArbiters.forEach(function(arbiters,N){
+                //Find new under arbiter units
+                arbiters.forEach(function(arbiter){
+                    //Find targets: same team units inside Arbiter sight, exclude Arbiter
+                    var targets=Game.getInRangeOnes(arbiter.posX(),arbiter.posY(),arbiter.get('sight'),N,true,null,function(chara){
+                        return arbiters.indexOf(chara)==-1;
+                    });
+                    Referee.underArbiterUnits[N]=Referee.underArbiterUnits[N].concat(targets);
                 });
-                Referee.enemyUnderArbiterUnits=Referee.enemyUnderArbiterUnits.concat(targets);
+                $.unique(Referee.underArbiterUnits[N]);
             });
-            $.unique(Referee.enemyUnderArbiterUnits);
             //Arbiter buffer effect on these units
-            Referee.ourUnderArbiterUnits.concat(Referee.enemyUnderArbiterUnits).forEach(function(chara){
-                chara.addBuffer(arbiterBuffer);
+            Referee.underArbiterUnits.forEach(function(charas){
+                charas.forEach(function(chara){
+                    chara.addBuffer(arbiterBuffer);
+                });
             });
         }
     },
@@ -94,38 +87,45 @@ var Referee={
         if (Game.mainTick%4==0){
             //Same detector buffer reference
             var detectorBuffer=Gobj.detectorBuffer;
-            var ourDetectors=Unit.allOurUnits().concat(Building.ourBuildings()).filter(function(chara){
-                return chara.detector;
-            });
-            var enemyDetectors=Unit.allEnemyUnits().concat(Building.enemyBuildings()).filter(function(chara){
-                return chara.detector;
+            var allDetectors=Game.getPropArray([]);
+            Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
+                if (chara.detector) allDetectors[chara.team].push(chara);
             });
             //Clear old units detected buffer
-            Referee.ourDetectedUnits.concat(Referee.enemyDetectedUnits).forEach(function(chara){
-                chara.removeBuffer(detectorBuffer);
-            });
-            Referee.ourDetectedUnits=[];
-            Referee.enemyDetectedUnits=[];
-            //Find new under arbiter units
-            ourDetectors.forEach(function(detector){
-                //Find targets: enemy invisible units inside my detector sight
-                var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),true,true,null,function(chara){
-                    return chara['isInvisible'+detector.team];
+            Referee.detectedUnits.forEach(function(charas,team){
+                charas.forEach(function(chara){
+                    chara.removeBuffer(detectorBuffer[team]);
                 });
-                Referee.ourDetectedUnits=Referee.ourDetectedUnits.concat(targets);
             });
-            $.unique(Referee.ourDetectedUnits);
-            enemyDetectors.forEach(function(detector){
-                //Find targets: our invisible units inside enemy detector sight
-                var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),false,true,null,function(chara){
-                    return chara['isInvisible'+detector.team];
+            Referee.detectedUnits=Game.getPropArray([]);
+            allDetectors.forEach(function(detectors,N){
+                //Find new under detector units
+                detectors.forEach(function(detector){
+                    //Find targets: enemy invisible units inside detector sight
+                    var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),N+'',true,null,function(chara){
+                        return chara['isInvisible'+N];
+                    });
+                    Referee.detectedUnits[N]=Referee.detectedUnits[N].concat(targets);
                 });
-                Referee.enemyDetectedUnits=Referee.enemyDetectedUnits.concat(targets);
+                $.unique(Referee.detectedUnits[N]);
             });
-            $.unique(Referee.enemyDetectedUnits);
             //Detector buffer effect on these units
-            Referee.ourDetectedUnits.concat(Referee.enemyDetectedUnits).forEach(function(chara){
-                chara.addBuffer(detectorBuffer);
+            Referee.detectedUnits.forEach(function(charas,team){
+                charas.forEach(function(chara){
+                    chara.addBuffer(detectorBuffer[team]);
+                });
+            });
+            //PurpleEffect, RedEffect and GreenEffect are also detector, override invisible
+            Animation.allEffects.filter(function(effect){
+                return (effect instanceof Animation.PurpleEffect) ||
+                    (effect instanceof Animation.RedEffect) ||
+                    (effect instanceof Animation.GreenEffect);
+            }).forEach(function(effect){
+                var target=effect.target;
+                for (var team=0;team<Game.playerNum;team++){
+                    //Make already invisible units visible by all teams
+                    if (target['isInvisible'+team]) target['isInvisible'+team]=false;
+                }
             });
         }
     },
