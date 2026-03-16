@@ -1,35 +1,48 @@
 var Resource={
     playerNum:0,
-    init:function(num){
-        if (num==undefined) num=2;
-        for (var N=0;N<num;N++){
+    init:function(){
+        for (var N=0;N<Game.playerNum;N++){
             Resource[N]={
                 mine:50,
                 gas:0,
                 curMan:0,
-                totalMan:10
+                totalMan:0
             };
         }
-        Resource.playerNum=num;
+        Resource.playerNum=Game.playerNum;
     },
-    getCost:function(name,isEnemy){
-        var team=Number(Boolean(isEnemy));
-        var cost;
+    getCost:function(name,team){
+        var cost,count;
+        if (team==null) team=Game.team;
+        else team=Number(team);
         [Zerg,Terran,Protoss,Building.ZergBuilding,Building.TerranBuilding,Building.ProtossBuilding,Magic,Upgrade].forEach(function(Type){
-            for (var item in Type){
-                //Filter out noise
-                if (item=='inherited' || item=='super' || item=='extends') continue;
-                if (item==name){
-                    cost=(typeof(Type[item])=='function')?Type[item].prototype.cost:Type[item].cost;
-                    //Resolve array cost
-                    if (cost) {
-                        //Clone fetched cost object, but sometimes undefined
-                        cost=_$.clone(cost);
-                        ['mine','gas','man','magic','time'].forEach(function(res){
-                            if(cost[res] && (cost[res] instanceof Array)) {
-                                cost[res]=cost[res][Type[item].level[team]];
-                            }
-                        });
+            //Not found yet
+            if (!cost) {
+                for (var item in Type){
+                    //Filter out noise
+                    if (item=='inherited' || item=='super' || item=='extends') continue;
+                    if (item==name){
+                        if (typeof(Type[item])=='function'){
+                            cost=Type[item].prototype.cost;
+                            count=Type[item].prototype.birthCount;
+                        }
+                        else cost=Type[item].cost;
+                        //Resolve array cost
+                        if (cost) {
+                            //Clone fetched cost object, but sometimes undefined
+                            cost=_$.clone(cost);
+                            ['mine','gas','man','magic','time'].forEach(function(res){
+                                if (cost[res]){
+                                    if (cost[res] instanceof Array){
+                                        cost[res]=cost[res][Type[item].level[team]];
+                                    }
+                                    if (count){
+                                        cost[res]*=count;
+                                    }
+                                }
+                            });
+                        }
+                        break;
                     }
                 }
             }
@@ -39,55 +52,55 @@ var Resource={
     //Check if paid successfully
     paypal:function(cost){
         if (cost){
-            var oweFlag=false, msg='';
+            var oweFlag=false;
             if (Cheat.gathering) cost.magic=0;
-            if(cost['mine'] && cost['mine']>Resource[0].mine){
+            var team=(this.team!=null)?this.team:Game.team;
+            if(cost['mine'] && cost['mine']>Resource[team].mine){
                 oweFlag=true;
-                msg+='Not enough minerals...mine more minerals<br>';
+                Game.showMessage('Not enough minerals...mine more minerals');
                 //Advisor voice
-                Referee.voice.resource[Game.race.selected].mine.play();
+                Referee.voice('resource')[Game.race.selected].mine.play();
             }
-            if(cost['gas'] && cost['gas']>Resource[0].gas){
+            if(cost['gas'] && cost['gas']>Resource[team].gas){
                 oweFlag=true;
-                msg+='Not enough Vespene gases...harvest more gas<br>';
+                Game.showMessage('Not enough Vespene gases...harvest more gas');
                 //Advisor voice
-                Referee.voice.resource[Game.race.selected].gas.play();
+                Referee.voice('resource')[Game.race.selected].gas.play();
             }
-            if(cost['man'] && cost['man']>(Resource[0].totalMan-Resource[0].curMan)){
+            if(cost['man'] && cost['man']>(Resource[team].totalMan-Resource[team].curMan) && !Cheat.manUnlimited){
                 oweFlag=true;
                 switch(Game.race.selected){
                     case 'Zerg':
-                        msg+='Too many underlings...create more Overlords<br>';
+                        Game.showMessage('Too many underlings...create more Overlords');
                         break;
                     case 'Terran':
-                        msg+='Not enough supplies...build more Supply Depots<br>';
+                        Game.showMessage('Not enough supplies...build more Supply Depots');
                         break;
                     case 'Protoss':
-                        msg+='Not enough psi...build more Pylons<br>';
+                        Game.showMessage('Not enough psi...build more Pylons');
                         break;
                 }
                 //Advisor voice
-                Referee.voice.resource[Game.race.selected].man.play();
+                Referee.voice('resource')[Game.race.selected].man.play();
             }
             if(cost['magic'] && cost['magic']>this.magic){
                 oweFlag=true;
-                msg+='Not enough energy<br>';
+                Game.showMessage('Not enough energy');
                 //Advisor voice
-                Referee.voice.resource[Game.race.selected].magic.play();
+                Referee.voice('resource')[Game.race.selected].magic.play();
             }
             if (oweFlag){
-                Game.showMessage(msg);
                 //Payment failed
                 return false;
             }
             else {
-                if (!Resource.creditBill){
+                if (!this.creditBill){
                     //Pay immediately
                     if(cost['mine']){
-                        Resource[0].mine-=cost['mine'];
+                        Resource[team].mine-=cost['mine'];
                     }
                     if(cost['gas']){
-                        Resource[0].gas-=cost['gas'];
+                        Resource[team].gas-=cost['gas'];
                     }
                     if(cost['magic']){
                         this.magic-=cost['magic'];
@@ -102,9 +115,9 @@ var Resource={
     },
     //Pay credit card bill
     payCreditBill:function(){
-        var cost=Resource.creditBill;
+        var cost=this.creditBill;
         //Paid credit bill, no longer owe money this time
-        delete Resource.creditBill;
+        delete this.creditBill;
         return Resource.paypal.call(this,cost);
     }
 };

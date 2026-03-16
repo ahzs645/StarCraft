@@ -1,15 +1,17 @@
 var Referee={
     //Tasks to run each game frame
-    tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan','judgeWinLose','alterSelectionMode'],
-    ourDetectedUnits:[],//Detected enemies
-    enemyDetectedUnits:[],//Detected ours
-    ourUnderArbiterUnits:[],
-    enemyUnderArbiterUnits:[],
+    tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan',
+        'monitorMiniMap','coverFog','alterSelectionMode','judgeBuildingInjury','judgeWinLose','saveReplaySnapshot'],
+    detectedUnits:[],
+    underArbiterUnits:[],
     _pos:[[-1,0],[1,0],[0,-1],[0,1]],//Collision avoid
-    voice:{
-        pError:new Audio('bgm/PointError.wav'),
-        button:new Audio('bgm/Button.wav'),
-        resource:{
+    voice:(function(){
+        var voice=function(name){
+            return voice[name];
+        };
+        voice.pError=new Audio('bgm/PointError.wav');
+        voice.button=new Audio('bgm/Button.wav');
+        voice.resource={
             Zerg:{
                 mine:new Audio('bgm/mine.Zerg.wav'),
                 gas:new Audio('bgm/gas.Zerg.wav'),
@@ -28,13 +30,14 @@ var Referee={
                 man:new Audio('bgm/man.Protoss.wav'),
                 magic:new Audio('bgm/magic.Protoss.wav')
             }
-        },
-        upgrade:{
+        };
+        voice.upgrade={
             Zerg:new Audio('bgm/upgrade.Zerg.wav'),
             Terran:new Audio('bgm/upgrade.Terran.wav'),
             Protoss:new Audio('bgm/upgrade.Protoss.wav')
-        }
-    },
+        };
+        return voice;
+    })(),
     winCondition:function(){
         //By default: All our units and buildings are killed
         return (Unit.allEnemyUnits().length==0 && Building.enemyBuildings().length==0);
@@ -46,40 +49,35 @@ var Referee={
     judgeArbiter:function(){
         //Every 0.4 sec
         if (Game.mainTick%4==0){
-            //Same Arbiter buffer reference
+            //Special skill: make nearby units invisible
             var arbiterBuffer=Protoss.Arbiter.prototype.bufferObj;
-            var myArbiters=Unit.ourFlyingUnits.filter(function(chara){
-                return chara.name=="Arbiter";
-            });
-            var enemyArbiters=Unit.enemyFlyingUnits.filter(function(chara){
-                return chara.name=="Arbiter";
+            var allArbiters=Game.getPropArray([]);
+            Unit.allUnits.forEach(function(chara){
+                if (chara.name=='Arbiter') allArbiters[chara.team].push(chara);
             });
             //Clear old units' Arbiter buffer
-            Referee.ourUnderArbiterUnits.concat(Referee.enemyUnderArbiterUnits).forEach(function(chara){
-                chara.removeBuffer(arbiterBuffer);
-            });
-            Referee.ourUnderArbiterUnits=[];
-            Referee.enemyUnderArbiterUnits=[];
-            //Find new under arbiter units
-            myArbiters.forEach(function(arbiter){
-                //Find targets: our units inside Arbiter sight, not including Arbiter
-                var targets=Game.getInRangeOnes(arbiter.posX(),arbiter.posY(),arbiter.get('sight'),false,true,null,function(chara){
-                    return myArbiters.indexOf(chara)==-1;
+            Referee.underArbiterUnits.forEach(function(charas){
+                charas.forEach(function(chara){
+                    chara.removeBuffer(arbiterBuffer);
                 });
-                Referee.ourUnderArbiterUnits=Referee.ourUnderArbiterUnits.concat(targets);
             });
-            $.unique(Referee.ourUnderArbiterUnits);
-            enemyArbiters.forEach(function(arbiter){
-                //Find targets: enemy units inside Arbiter sight
-                var targets=Game.getInRangeOnes(arbiter.posX(),arbiter.posY(),arbiter.get('sight'),true,true,null,function(chara){
-                    return enemyArbiters.indexOf(chara)==-1;
+            Referee.underArbiterUnits=Game.getPropArray([]);
+            allArbiters.forEach(function(arbiters,N){
+                //Find new under arbiter units
+                arbiters.forEach(function(arbiter){
+                    //Find targets: same team units inside Arbiter sight, exclude Arbiter
+                    var targets=Game.getInRangeOnes(arbiter.posX(),arbiter.posY(),arbiter.get('sight'),N,true,null,function(chara){
+                        return arbiters.indexOf(chara)==-1;
+                    });
+                    Referee.underArbiterUnits[N]=Referee.underArbiterUnits[N].concat(targets);
                 });
-                Referee.enemyUnderArbiterUnits=Referee.enemyUnderArbiterUnits.concat(targets);
+                $.unique(Referee.underArbiterUnits[N]);
             });
-            $.unique(Referee.enemyUnderArbiterUnits);
             //Arbiter buffer effect on these units
-            Referee.ourUnderArbiterUnits.concat(Referee.enemyUnderArbiterUnits).forEach(function(chara){
-                chara.addBuffer(arbiterBuffer);
+            Referee.underArbiterUnits.forEach(function(charas){
+                charas.forEach(function(chara){
+                    chara.addBuffer(arbiterBuffer);
+                });
             });
         }
     },
@@ -89,38 +87,45 @@ var Referee={
         if (Game.mainTick%4==0){
             //Same detector buffer reference
             var detectorBuffer=Gobj.detectorBuffer;
-            var ourDetectors=Unit.allOurUnits().concat(Building.ourBuildings()).filter(function(chara){
-                return chara.detector;
-            });
-            var enemyDetectors=Unit.allEnemyUnits().concat(Building.enemyBuildings()).filter(function(chara){
-                return chara.detector;
+            var allDetectors=Game.getPropArray([]);
+            Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
+                if (chara.detector) allDetectors[chara.team].push(chara);
             });
             //Clear old units detected buffer
-            Referee.ourDetectedUnits.concat(Referee.enemyDetectedUnits).forEach(function(chara){
-                chara.removeBuffer(detectorBuffer);
-            });
-            Referee.ourDetectedUnits=[];
-            Referee.enemyDetectedUnits=[];
-            //Find new under arbiter units
-            ourDetectors.forEach(function(detector){
-                //Find targets: enemy invisible units inside my detector sight
-                var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),true,true,null,function(chara){
-                    return chara.isInvisible;
+            Referee.detectedUnits.forEach(function(charas,team){
+                charas.forEach(function(chara){
+                    chara.removeBuffer(detectorBuffer[team]);
                 });
-                Referee.ourDetectedUnits=Referee.ourDetectedUnits.concat(targets);
             });
-            $.unique(Referee.ourDetectedUnits);
-            enemyDetectors.forEach(function(detector){
-                //Find targets: our invisible units inside enemy detector sight
-                var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),false,true,null,function(chara){
-                    return chara.isInvisible;
+            Referee.detectedUnits=Game.getPropArray([]);
+            allDetectors.forEach(function(detectors,N){
+                //Find new under detector units
+                detectors.forEach(function(detector){
+                    //Find targets: enemy invisible units inside detector sight
+                    var targets=Game.getInRangeOnes(detector.posX(),detector.posY(),detector.get('sight'),N+'',true,null,function(chara){
+                        return chara['isInvisible'+N];
+                    });
+                    Referee.detectedUnits[N]=Referee.detectedUnits[N].concat(targets);
                 });
-                Referee.enemyDetectedUnits=Referee.enemyDetectedUnits.concat(targets);
+                $.unique(Referee.detectedUnits[N]);
             });
-            $.unique(Referee.enemyDetectedUnits);
             //Detector buffer effect on these units
-            Referee.ourDetectedUnits.concat(Referee.enemyDetectedUnits).forEach(function(chara){
-                chara.addBuffer(detectorBuffer);
+            Referee.detectedUnits.forEach(function(charas,team){
+                charas.forEach(function(chara){
+                    chara.addBuffer(detectorBuffer[team]);
+                });
+            });
+            //PurpleEffect, RedEffect and GreenEffect are also detector, override invisible
+            Animation.allEffects.filter(function(effect){
+                return (effect instanceof Animation.PurpleEffect) ||
+                    (effect instanceof Animation.RedEffect) ||
+                    (effect instanceof Animation.GreenEffect);
+            }).forEach(function(effect){
+                var target=effect.target;
+                for (var team=0;team<Game.playerNum;team++){
+                    //Make already invisible units visible by all teams
+                    if (target['isInvisible'+team]) target['isInvisible'+team]=false;
+                }
             });
         }
     },
@@ -186,7 +191,7 @@ var Referee={
                 }
                 //Separate override ones
                 if (dist==0) {
-                    var colPos=Referee._pos[Math.random()*4>>0];
+                    var colPos=Referee._pos[Game.getNextRandom()*4>>0];
                     if (chara1 instanceof Unit){
                         chara1.x+=colPos[0];
                         chara1.y+=colPos[1];
@@ -269,7 +274,7 @@ var Referee={
                 var distLimit=Unit.meleeRange;
                 //Separate override ones
                 if (dist==0) {
-                    var colPos=Referee._pos[Math.random()*4>>0];
+                    var colPos=Referee._pos[Game.getNextRandom()*4>>0];
                     chara1.x+=colPos[0];
                     chara1.y+=colPos[1];
                     dist=1;
@@ -304,7 +309,7 @@ var Referee={
     alterSelectionMode:function(){
         //GC after some user changes
         $.extend([],Game.allSelected).forEach(function(chara){
-            if (chara.status=='dead' || (chara.isInvisible && chara.isEnemy()))
+            if (chara.status=='dead' || (chara['isInvisible'+Game.team] && chara.isEnemy()))
                 Game.allSelected.splice(Game.allSelected.indexOf(chara),1);
         });
         //Alter info UI: Multi selection mode
@@ -339,36 +344,77 @@ var Referee={
                 //Can give birth to 3 larvas
                 for(var N=0;N<3;N++){
                     if (chara.larvas[N]==null || chara.larvas[N].status=="dead"){
-                        chara.larvas[N]=new Zerg.Larva({x:(chara.x+N*48),y:(chara.y+chara.height),team:chara.team});
+                        chara.larvas[N]=new Zerg.Larva({x:(chara.x+N*48),y:(chara.y+chara.height+4),team:chara.team});
+                        chara.larvas[N].owner=chara;
                         break;
                     }
                 }
             });
         }
     },
+    judgeBuildingInjury:function(){
+        //Every 1 sec
+        if (Game.mainTick%10==0){
+            Building.allBuildings.filter(function(build){
+                return build.injuryOffsets;
+            }).forEach(function(build){
+                var injuryLevel=(1-build.life/build.HP)/0.25>>0;
+                if (injuryLevel>3) injuryLevel=3;
+                var curLevel=build.injuryAnimations.length;
+                if (injuryLevel>curLevel){
+                    var offsets=build.injuryOffsets;
+                    var scale=build.injuryScale?build.injuryScale:1;
+                    for (var N=curLevel;N<injuryLevel;N++){
+                        //Add injury animations
+                        build.injuryAnimations.push(new Animation[build.injuryNames[N]]({target:build,offset:offsets[N],scale:scale}));
+                    }
+                    if ((build instanceof Building.TerranBuilding) || (build instanceof Building.ProtossBuilding)){
+                        if (injuryLevel>1) build.sound.selected=build.sound.onfire;
+                    }
+                }
+                if (injuryLevel<curLevel){
+                    for (var N=curLevel;N>injuryLevel;N--){
+                        //Clear injury animations
+                        build.injuryAnimations.pop().die();
+                    }
+                    if ((build instanceof Building.TerranBuilding) || (build instanceof Building.ProtossBuilding)){
+                        if (injuryLevel<=1) build.sound.selected=build.sound.normal;
+                    }
+                }
+            });
+        }
+    },
     judgeMan:function(){
-        //Update our current man and total man
-        var curMan=0,totalMan=0;
-        Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
-            if (chara.cost && chara.cost.man) curMan+=chara.cost.man;
-            if (chara.manPlus) totalMan+=chara.manPlus;
+        //Update current man and total man for all teams
+        var curMan=Game.getPropArray(0),totalMan=Game.getPropArray(0);
+        Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
+            if (chara.cost && chara.cost.man) (curMan[chara.team])+=chara.cost.man;
+            if (chara.manPlus) (totalMan[chara.team])+=chara.manPlus;
+            //Transport
+            if (chara.loadedUnits) {
+                chara.loadedUnits.forEach(function(passenger){
+                    if (passenger.cost && passenger.cost.man) (curMan[passenger.team])+=passenger.cost.man;
+                });
+            }
         });
-        Resource[0].curMan=curMan;
-        Resource[0].totalMan=totalMan;
-        //Update enemy current man and total man
-        curMan=0;
-        totalMan=0;
-        Unit.allEnemyUnits().concat(Building.enemyBuildings()).forEach(function(chara){
-            if (chara.cost) curMan+=chara.cost.man;
-            if (chara.manPlus) totalMan+=chara.manPlus;
-        });
-        Resource[1].curMan=curMan;
-        Resource[1].totalMan=totalMan;
+        for (var N=0;N<Game.playerNum;N++){
+            Resource[N].curMan=curMan[N];
+            Resource[N].totalMan=totalMan[N];
+        }
     },
     judgeWinLose:function(){
-        if (Referee.loseCondition())
-            Game.lose();
-        if (Referee.winCondition())
-            Game.win();
+        //Every 1 sec
+        if (Game.mainTick%10==0){
+            if (Referee.loseCondition())
+                Game.lose();
+            if (Referee.winCondition())
+                Game.win();
+        }
+    },
+    saveReplaySnapshot:function(){
+        //Save replay snapshot every 3 sec
+        if (Game.mainTick%30==0){
+            Game.saveReplay();
+        }
     }
 };

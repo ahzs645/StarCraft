@@ -296,9 +296,12 @@ var Game={
         Protoss.Reaver.prototype.scarabCapacity=Game.getPropArray(Protoss.Reaver.prototype.scarabCapacity);
         Referee.underArbiterUnits=Game.getPropArray([]);
         Referee.detectedUnits=Game.getPropArray([]);
+        Gobj.detectorBuffer=[];
         for (var N=0;N<Game.playerNum;N++){
             //Initial detector buffer
-            Gobj.detectorBuffer['isInvisible'+N]=false;
+            var buffer={};
+            buffer['isInvisible'+N]=false;
+            Gobj.detectorBuffer.push(buffer);
             //Initial arbiter buffer
             Protoss.Arbiter.prototype.bufferObj['isInvisible'+N]=true;
         }
@@ -1094,6 +1097,8 @@ var Game={
         //Resize panel_Info
         $('div.panel_Info')[0].style.width=((Game.HBOUND-295)+'px');
         if (Map.getCurrentMap()){
+            Map.fogCanvas.width=Game.HBOUND;
+            Map.fogCanvas.height=Game.VBOUND-Game.infoBox.height+5;
             //Update map inside-stroke size
             Map.insideStroke.width=(130*Game.HBOUND/Map.getCurrentMap().width)>>0;
             Map.insideStroke.height=(130*Game.VBOUND/Map.getCurrentMap().height)>>0;
