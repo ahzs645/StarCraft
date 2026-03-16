@@ -79,11 +79,18 @@ Gobj.prototype.moving=function(){
         //Detect OutOfBound
         myself.detectOutOfBound();
     };
-    movingFrame();//Add one missing frame
-    this._timer=setInterval(movingFrame,100);
+    this.allFrames['moving']=movingFrame;
+    var animateFrame=function(){
+        //Only play animation, will not move
+        myself.animeFrame();
+    };
+    this.allFrames['animate']=animateFrame;
 };
 Gobj.prototype.stop=function(){
     //Clear both kinds of timer
+    delete this.allFrames['moving'];
+    delete this.allFrames['dock'];
+    delete this.allFrames['animate'];
     clearInterval(this._timer);
     clearTimeout(this._timer);
     //this.status="stop";
@@ -182,7 +189,7 @@ Gobj.prototype.addBuffer=function(bufferObj,onAll){
         //Add buffer into override list
         this.override[prop].unshift(buffer);
         //Override unit property by time sequence if has
-        if (this[prop]!=null || prop=='isInvisible' || onAll) this[prop]=buffer;
+        if (this[prop]!=null || prop.indexOf('isInvisible')!=-1 || onAll) this[prop]=buffer;
     }
     this.bufferObjs.push(bufferObj);
     //Refresh
@@ -216,32 +223,49 @@ Gobj.prototype.cannotMove=function(){
     return (this instanceof Building) || Boolean(this.burrowBuffer);
 };
 Gobj.prototype.evolveTo=function(charaType,burstArr){
+    var props;
+    if (typeof charaType=='function') {
+        props={
+            type:charaType,
+            burstArr:burstArr
+        };
+    }
+    else props=charaType;
+    //Init
     var newTypeChara=null;
     var selectedStatus=[this.selected,(this==Game.selectedUnit)];
+    var team=this.team;
+    var type=props.type;
+    var bursts=props.burstArr;
+    var mixin=props.mixin;
+    var rallyPoint=props.rallyPoint;
     //Hide die burst and sound for old unit, then die
     this.dieEffect=this.sound.death=null;
     this.die();
-    if (this.processing) delete this.processing;
+    if (this.processing && !props.chain) delete this.processing;
     //Birth function
     var bornAt=function(chara){
-        newTypeChara=new charaType({target:chara});
+        var prop={target:chara,team:team};
+        if (mixin) _$.mixin(prop,mixin);
+        newTypeChara=new type(prop);
+        if (rallyPoint) newTypeChara.destination=rallyPoint;
         //Fix cannot select egg issue
-        setTimeout(function(){
+        Game.commandTimeout(function(){
             if (selectedStatus[0]) Game.addIntoAllSelected(newTypeChara);
             if (selectedStatus[1]) Game.changeSelectedTo(newTypeChara);
         },0);
     };
     //Burst chain
-    if (burstArr){
+    if (bursts){
         var pos={x:this.posX(),y:this.posY()};
-        var birth=new Burst[burstArr[0]](pos);
+        var birth=new Burst[bursts[0]](pos);
         var evolveChain=function(N){
             return function(){
-                birth=new Burst[burstArr[N]](pos);
-                if ((N+1)<burstArr.length) birth.callback=evolveChain(N+1);
+                birth=new Burst[bursts[N]](pos);
+                if ((N+1)<bursts.length) birth.callback=evolveChain(N+1);
                 //Finish evolve chain
                 else birth.callback=function(){
-                    var times=charaType.prototype.birthCount;
+                    var times=type.prototype.birthCount;
                     if (times==null) times=1;
                     for (var N=0;N<times;N++){
                         bornAt(birth);
@@ -250,10 +274,10 @@ Gobj.prototype.evolveTo=function(charaType,burstArr){
             };
         };
         //Start evolve chain
-        if (burstArr.length>1) birth.callback=evolveChain(1);
+        if (bursts.length>1) birth.callback=evolveChain(1);
         //Finish evolve chain
         else birth.callback=function(){
-            var times=charaType.prototype.birthCount;
+            var times=type.prototype.birthCount;
             if (times==null) times=1;
             for (var N=0;N<times;N++){
                 bornAt(birth);
@@ -269,15 +293,26 @@ Gobj.detectorBuffer={isInvisible:false};
 Gobj.getAOETargets=function(owner,target){
     var targets;
     //Get possible targets based on team and attack limit
-    if (owner.isEnemy()) {
-        targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
-            Unit.ourFlyingUnits:Unit.ourGroundUnits.concat(Building.ourBuildings()))
-            :(Unit.allOurUnits().concat(Building.ourBuildings()));
-    }
-    else {
-        targets=(owner.attackLimit)?((owner.attackLimit=="flying")?
-            Unit.enemyFlyingUnits:Unit.enemyGroundUnits.concat(Building.enemyBuildings()))
-            :(Unit.allEnemyUnits().concat(Building.enemyBuildings()));
+    switch(owner.attackLimit){
+        case "flying":
+            targets=Unit.allUnits.filter(function(chara){
+                return chara.team!=owner.team && chara.isFlying;
+            });
+            break;
+        case "ground":
+            var enemyUnits=Unit.allUnits.filter(function(chara){
+                return chara.team!=owner.team && !(chara.isFlying);
+            });
+            var enemyBuildings=Building.allBuildings.filter(function(chara){
+                return chara.team!=owner.team;
+            });
+            targets=enemyUnits.concat(enemyBuildings);
+            break;
+        default:
+            targets=(Unit.allUnits.concat(Building.allBuildings)).filter(function(chara){
+                return chara.team!=owner.team;
+            });
+            break;
     }
     //Range filter by AOE type
     switch (owner.AOE.type) {
@@ -294,6 +329,7 @@ Gobj.getAOETargets=function(owner,target){
                 return false;
             });
             break;
+        case "MULTIPLE":
         case "CIRCLE":
         default:
             targets=targets.filter(function(chara){

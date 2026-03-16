@@ -3,7 +3,7 @@ var Unit=Gobj.extends({
     constructorPlus:function(props){
         //Add id for unit
         this.id=Unit.currentID++;
-        this.direction=(Math.random()*8)>>0;//Random direction,Math.floor
+        this.direction=(Game.getNextRandom()*8)>>0;//Random direction, deterministic for replay
         //team is set in Gobj constructor from props.team or props.isEnemy
         this.life=this.get('HP');
         if (this.SP) this.shield=this.get('SP');
@@ -18,7 +18,7 @@ var Unit=Gobj.extends({
         };
         //Finish below after fully constructed, postpone
         var myself=this;
-        setTimeout(function(){
+        Game.commandTimeout(function(){
             //Add this unit into Game
             Unit.allUnits.push(myself);
             if (myself.isFlying) {
@@ -100,11 +100,14 @@ var Unit=Gobj.extends({
             this.action=0;
             //Stop routing
             clearInterval(this.routingTimer);
+            this.routingTimer=0;
+            delete this.allFrames['routing'];
             var myself=this;
-            this._timer=setInterval(function(){
+            var animateFrame=function(){
                 //Only play animation, will not move
                 myself.animeFrame();
-            },100);
+            };
+            this.allFrames['animate']=animateFrame;
         },
         stand:function(){
             this.dock();
@@ -126,6 +129,7 @@ var Unit=Gobj.extends({
                 //Stop routing
                 clearInterval(this.routingTimer);
                 this.routingTimer=0;
+                delete this.allFrames['routing'];
                 //Reach destination flag
                 return true;
             }
@@ -196,7 +200,9 @@ var Unit=Gobj.extends({
             //If already routing
             if (this.routingTimer) {
                 clearInterval(this.routingTimer);//then break routing
+                this.routingTimer=0;
             }
+            delete this.allFrames['routing'];
             //Start new routing
             var myself=this;
             var routingFrame=function(){
@@ -206,9 +212,7 @@ var Unit=Gobj.extends({
                     return true;
                 }
             };
-            //Add one missing frame, fix twice callback issue
-            if (routingFrame()) callback=null;
-            this.routingTimer=setInterval(routingFrame,100);
+            this.allFrames['routing']=routingFrame;
             //Start moving
             this.run();
         },
@@ -217,7 +221,9 @@ var Unit=Gobj.extends({
             //If already routing
             if (this.routingTimer) {
                 clearInterval(this.routingTimer);//then break routing
+                this.routingTimer=0;
             }
+            delete this.allFrames['routing'];
             //Start new routing
             var myself=this;
             var routingFrame=function(){
@@ -232,12 +238,12 @@ var Unit=Gobj.extends({
                 //Will stop move toward dead target
                 else {
                     clearInterval(myself.routingTimer);
+                    myself.routingTimer=0;
+                    delete myself.allFrames['routing'];
                     myself.dock();
                 }
             };
-            //Add one missing frame, fix twice callback issue
-            if (routingFrame()) callback=null;
-            this.routingTimer=setInterval(routingFrame,100);
+            this.allFrames['routing']=routingFrame;
             //Start moving
             this.run();
         },
@@ -248,6 +254,8 @@ var Unit=Gobj.extends({
             this.life=0;
             //Stop routing
             clearInterval(this.routingTimer);
+            this.routingTimer=0;
+            delete this.allFrames['routing'];
             //If has sound effect
             if (this.sound.death && this.insideScreen()) {
                 this.sound.death.play();
@@ -424,77 +432,99 @@ Unit.turnAround=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
-    this.dockTimer=setInterval(function(){
-        //Look around animation
-        if (myself.status=="dock") {
-            myself.turnTo((myself.direction+1)%8);//For all ground soldier to use
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
+    var dockFrame=function(){
+        //Every 2 sec
+        if ((Game.mainTick+myself.id)%20==0){
+            //Look around animation
+            if (myself.status=="dock") {
+                myself.turnTo((myself.direction+1)%8);//For all ground soldier to use
+            }
+            else delete myself.allFrames['dock'];
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-    },2000);
+    };
+    this.allFrames['dock']=dockFrame;
 };
 //Dock action II
 Unit.walkAround=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
-    this.dockTimer=setInterval(function(){
-        var direction=(Math.random()*8)>>0;//Math.floor
-        //Walk around, for all critters to use
-        if (myself.status=="dock") {
-            myself.moveTo(myself.posX()+myself.get('speed')[direction].x*6,myself.posY()+myself.get('speed')[direction].y*6);
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
+    var dockFrame=function(){
+        //Every 2 sec
+        if ((Game.mainTick+myself.id)%20==0){
+            var direction=(Game.getNextRandom()*8)>>0;
+            //Walk around, for all critters to use
+            if (myself.status=="dock") {
+                myself.moveTo(myself.posX()+myself.get('speed')[direction].x*6,myself.posY()+myself.get('speed')[direction].y*6);
+            }
+            else delete myself.allFrames['dock'];
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-    },2000);
+    };
+    this.allFrames['dock']=dockFrame;
 };
 //Dock action III
 Unit.hover=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
     var N=0;
     var hoverOffset=1;
-    this.dockTimer=setInterval(function(){
-        //Hover animation
-        if (myself.status=="dock") {
-            myself.y+=hoverOffset;
-            if (N%4==0) {
-                //myself.turnTo((myself.direction+1)%8);//For marine to use
-                hoverOffset=-hoverOffset;//Hover up and down
+    var dockFrame=function(){
+        //Every 200 ms
+        if (Game.mainTick%2==0){
+            //Hover animation
+            if (myself.status=="dock") {
+                myself.y+=hoverOffset;
+                if (N%4==0) {
+                    //myself.turnTo((myself.direction+1)%8);//For marine to use
+                    hoverOffset=-hoverOffset;//Hover up and down
+                }
             }
+            else delete myself.allFrames['dock'];
+            N++;
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-        N++;
-    },200);
+    };
+    this.allFrames['dock']=dockFrame;
 };
 //Dock action IV
 Unit.walkAroundLarva=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
-    this.dockTimer=setInterval(function(){
-        var direction=(myself.direction+1)%8;//Math.floor
-        //Walk around, for all critters to use
-        if (myself.status=="dock") {
-            Unit.prototype.moveTo.call(myself,myself.posX()+myself.get('speed')[direction].x*6,myself.posY()+myself.get('speed')[direction].y*6);
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
+    var dockFrame=function(){
+        //Every 2 sec
+        if (Game.mainTick%20==0){
+            //Walk around, for larva to use
+            if (myself.status=="dock") {
+                if (myself.moved) {
+                    //Return to original position
+                    Unit.prototype.moveTo.call(myself,myself.originX,myself.originY,4);
+                    myself.moved=false;
+                }
+                else {
+                    myself.direction=(Game.getNextRandom()*8)>>0;
+                    Unit.prototype.moveTo.call(myself,
+                        myself.posX()+myself.get('speed')[myself.direction].x*2,
+                        myself.posY()+myself.get('speed')[myself.direction].y*2,4);
+                    myself.moved=true;
+                }
+            }
+            else delete myself.allFrames['dock'];
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-    },2000);
+    };
+    this.allFrames['dock']=dockFrame;
 };
 var AttackableUnit=Unit.extends({
     constructorPlus:function(props){
@@ -570,7 +600,7 @@ var AttackableUnit=Unit.extends({
                 var range=this.get('attackRange');
                 if (this.tracing) {
                     //Adjust attack range for tracing
-                    range=Math.max(this.get('attackRange')-50,this.radius()+enemy.radius());
+                    range=Math.max(this.get('attackRange')*0.7,(this.radius()+enemy.radius())*0.6);
                     delete this.tracing;
                 }
                 //Add to fix holding issue
@@ -588,7 +618,7 @@ var AttackableUnit=Unit.extends({
                             //Load bullet
                             myself.coolDown=false;
                             //Cool down after attack interval
-                            setTimeout(function(){
+                            Game.commandTimeout(function(){
                                 myself.coolDown=true;
                             },myself.get('attackInterval'));
                             //If AOE, init enemies using shared utility
@@ -604,7 +634,7 @@ var AttackableUnit=Unit.extends({
                                 //Change status to show attack frame
                                 myself.status="attack";
                                 //Will return to dock after attack
-                                setTimeout(function(){
+                                Game.commandTimeout(function(){
                                     //If still show attack
                                     if (myself.status=="attack") {
                                         myself.status="dock";
@@ -614,31 +644,47 @@ var AttackableUnit=Unit.extends({
                             }
                             //If has bullet
                             if (myself.Bullet) {
-                                //Will shoot multiple bullets in one time
-                                if (myself.continuousAttack) {
-                                    myself.bullet=new Array();
-                                    for (var N=0;N<myself.continuousAttack.count;N++){
-                                        var bullet=new myself.Bullet({
-                                            from:myself,
-                                            to:enemy
-                                        });
-                                        //Reassign bullets location
-                                        if (myself.continuousAttack.layout) myself.continuousAttack.layout(bullet,N);
-                                        if (myself.continuousAttack.onlyOnce && N!=0) {
-                                            bullet.noDamage=true;
+                                var fireBullet=function(){
+                                    //Will shoot multiple bullets in one time
+                                    if (myself.continuousAttack) {
+                                        myself.bullet=[];
+                                        for (var N=0;N<myself.continuousAttack.count;N++){
+                                            var bullet=new myself.Bullet({
+                                                from:myself,
+                                                to:enemy
+                                            });
+                                            //Reassign bullets location
+                                            if (myself.continuousAttack.layout) myself.continuousAttack.layout(bullet,N);
+                                            if (myself.continuousAttack.onlyOnce && N!=(myself.continuousAttack.count/2>>0)) {
+                                                bullet.noDamage=true;
+                                            }
+                                            bullet.fire();
+                                            myself.bullet.push(bullet);
                                         }
-                                        bullet.fire();
-                                        myself.bullet.push(bullet);
                                     }
-                                }
-                                else {
-                                    //Reload one new bullet
-                                    myself.bullet=new myself.Bullet({
-                                        from:myself,
-                                        to:enemy
-                                    });
-                                    myself.bullet.fire();
-                                }
+                                    else {
+                                        if (myself.AOE && myself.AOE.type=="MULTIPLE"){
+                                            for (var N=0;N<Math.min(myself.AOE.count,enemies.length);N++){
+                                                new myself.Bullet({
+                                                    from:myself,
+                                                    to:enemies[N]
+                                                }).fire();
+                                            }
+                                        }
+                                        else {
+                                            //Reload one new bullet
+                                            myself.bullet=new myself.Bullet({
+                                                from:myself,
+                                                to:enemy
+                                            });
+                                            myself.bullet.fire();
+                                        }
+                                    }
+                                };
+                                if (myself.fireDelay) Game.commandTimeout(function(){
+                                    fireBullet();
+                                },myself.fireDelay);
+                                else fireBullet();
                             }
                             //Else will cause damage immediately (melee attack)
                             else {
@@ -648,11 +694,11 @@ var AttackableUnit=Unit.extends({
                                     enemies.forEach(function(chara){
                                         chara.getDamageBy(myself);
                                         chara.reactionWhenAttackedBy(myself);
-                                    })
+                                    });
                                 }
                                 else {
                                     //Cause damage after finish whole melee attack action
-                                    setTimeout(function(){
+                                    Game.commandTimeout(function(){
                                         enemy.getDamageBy(myself);
                                         enemy.reactionWhenAttackedBy(myself);
                                     },myself.frame.attack*100);
@@ -665,7 +711,7 @@ var AttackableUnit=Unit.extends({
                                 if (myself.AOE && myself.AOE.hasEffect) {
                                     enemies.forEach(function(chara){
                                         new myself.attackEffect({x:chara.posX(),y:chara.posY()});
-                                    })
+                                    });
                                 }
                                 else {
                                     new myself.attackEffect({x:enemy.posX(),y:enemy.posY()});
@@ -676,30 +722,27 @@ var AttackableUnit=Unit.extends({
                         }
                     }
                 };
-                attackFrame();//Add one missing frame
-                this.attackTimer=setInterval(attackFrame,100);
+                this.allFrames['attack']=attackFrame;
             }
         },
         stopAttack:function(){
             //Stop attacking animation
+            delete this.allFrames['attack'];
             clearInterval(this.attackTimer);
+            this.attackTimer=0;
             //Clear target
             this.target={};
         },
         findNearbyTargets:function(){
             //Initial
-            var units,buildings,results=[];
-            //Only ours
-            if (this.isEnemy()) {
-                units=Unit.allOurUnits();
-                buildings=Building.ourBuildings();
-            }
-            //Only enemies
-            else {
-                units=Unit.allEnemyUnits();
-                buildings=Building.enemyBuildings();
-            }
             var myself=this;
+            var units=Unit.allUnits.filter(function(chara){
+                return chara.team!=myself.team;
+            });
+            var buildings=Building.allBuildings.filter(function(chara){
+                return chara.team!=myself.team;
+            });
+            var results=[];
             [units,buildings].forEach(function(charas){
                 var myX=myself.posX();
                 var myY=myself.posY();
@@ -853,57 +896,66 @@ AttackableUnit.turnAround=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
-    this.dockTimer=setInterval(function(){
-        //Look around animation
-        if (myself.isIdle()) {
-            myself.turnTo((myself.direction+1)%8);//For all ground soldier to use
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
+    var dockFrame=function(){
+        //Every 2 sec
+        if ((Game.mainTick+myself.id)%20==0){
+            //Look around animation
+            if (myself.isIdle()) {
+                myself.turnTo((myself.direction+1)%8);//For all ground soldier to use
+            }
+            else delete myself.allFrames['dock'];
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-    },2000);
+    };
+    this.allFrames['dock']=dockFrame;
 };
 //Dock action II, override
 AttackableUnit.walkAround=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
-    this.dockTimer=setInterval(function(){
-        var direction=(Math.random()*8)>>0;//Math.floor
-        //Walk around, for all critters to use
-        if (myself.isIdle()) {
-            myself.moveTo(myself.posX()+myself.get('speed')[direction].x*6,myself.posY()+myself.get('speed')[direction].y*6);
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
+    var dockFrame=function(){
+        //Every 2 sec
+        if ((Game.mainTick+myself.id)%20==0){
+            var direction=(Game.getNextRandom()*8)>>0;
+            //Walk around, for all critters to use
+            if (myself.isIdle()) {
+                myself.moveTo(myself.posX()+myself.get('speed')[direction].x*6,myself.posY()+myself.get('speed')[direction].y*6);
+            }
+            else delete myself.allFrames['dock'];
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-    },2000);
+    };
+    this.allFrames['dock']=dockFrame;
 };
 //Dock action III, override
 AttackableUnit.hover=function(){
     //Inherited dock from Unit.js
     Unit.prototype.dock.call(this);
     //Add in new things
-    if (this.dockTimer) clearInterval(this.dockTimer);
     var myself=this;
+    if (this.dockTimer) clearInterval(this.dockTimer);
+    this.dockTimer=0;
     var N=0;
     var hoverOffset=1;
-    this.dockTimer=setInterval(function(){
-        //Hover animation
-        if (myself.isIdle()) {
-            myself.y+=hoverOffset;
-            if (N%4==0) {
-                //myself.turnTo((myself.direction+1)%8);//For marine to use
-                hoverOffset=-hoverOffset;//Hover up and down
+    var dockFrame=function(){
+        //Every 200 ms
+        if (Game.mainTick%2==0){
+            //Hover animation
+            if (myself.isIdle()) {
+                myself.y+=hoverOffset;
+                if (N%4==0) {
+                    //myself.turnTo((myself.direction+1)%8);//For marine to use
+                    hoverOffset=-hoverOffset;//Hover up and down
+                }
             }
+            else delete myself.allFrames['dock'];
+            N++;
         }
-        else {
-            clearInterval(myself.dockTimer);
-        }
-        N++;
-    },200);
+    };
+    this.allFrames['dock']=dockFrame;
 };

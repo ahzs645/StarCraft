@@ -44,6 +44,17 @@ var keyController={
                 case 40:
                     Map.needRefresh="BOTTOM";
                     break;
+                //Replay speed control
+                case 107:
+                case 33:
+                    //Speed up + or pageUp
+                    Button.speedUpHandler();
+                    break;
+                case 109:
+                case 34:
+                    //Slow down - or pageDown
+                    Button.slowDownHandler();
+                    break;
                 //Shortcut keys:
                 //Press M
                 case 77:

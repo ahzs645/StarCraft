@@ -51,6 +51,10 @@ var mouseController={
             //Callback
             Button.execute(event);
         }
+        //Hide tooltip when click
+        $('div.tooltip_Box').hide();
+        //Login user statistic
+        if (Multiplayer.statistic!=null) Multiplayer.statistic.left++;
     },
     rightClick:function(event,unlock,btn){
         //Mouse at (clickX,clickY)
@@ -65,7 +69,15 @@ var mouseController={
         var charas=Game.allSelected.filter(function(chara){
             return chara.team==Game.team && chara.status!="dead";
         });
-        mouseController.rightClickHandler(charas,pos,unlock,btn || Button.callback);
+        Multiplayer.cmds.push(JSON.stringify({
+            uids:Multiplayer.getUIDs(charas),
+            type:'rightClick',
+            pos:pos,
+            unlock:Boolean(unlock),
+            btn:btn
+        }));
+        //Login user statistic
+        if (Multiplayer.statistic!=null) Multiplayer.statistic.right++;
     },
     rightClickHandler:function(charas,pos,unlock,btn){
         //Find selected one or nothing
@@ -145,13 +157,13 @@ var mouseController={
         $('#frontCanvas')[0].oncontextmenu=function(event){
             //Prevent context menu show
             event.preventDefault();
+            //Should not control units during replay
+            if (Game.replayFlag) return;
             mouseController.rightClick(event);
             //Cancel pointer
             $('div.GameLayer').removeAttr('status');
             //Cancel callback
             Button.callback=null;
-            //Cancel credit bill
-            if (Resource.creditBill) delete Resource.creditBill;
         };
         //Double click
         $('#frontCanvas')[0].ondblclick=function(event){
@@ -213,6 +225,7 @@ var mouseController={
             event.preventDefault();
             //Prevent desktop event
             $('#frontCanvas')[0].oncontextmenu=undefined;
+            if (Game.replayFlag) return;
             mouseController.rightClick(event.changedTouches[0]);
             //Cancel handler
             $('div.GameLayer').removeAttr('status');

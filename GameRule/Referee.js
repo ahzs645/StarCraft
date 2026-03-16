@@ -1,7 +1,7 @@
 var Referee={
     //Tasks to run each game frame
     tasks:['judgeArbiter','judgeDetect','judgeRecover','judgeDying','judgeCollision','addLarva','judgeMan',
-        'monitorMiniMap','coverFog','judgeWinLose','alterSelectionMode'],
+        'monitorMiniMap','coverFog','alterSelectionMode','judgeBuildingInjury','judgeWinLose','saveReplaySnapshot'],
     ourDetectedUnits:[],//Detected enemies
     enemyDetectedUnits:[],//Detected ours
     ourUnderArbiterUnits:[],
@@ -191,7 +191,7 @@ var Referee={
                 }
                 //Separate override ones
                 if (dist==0) {
-                    var colPos=Referee._pos[Math.random()*4>>0];
+                    var colPos=Referee._pos[Game.getNextRandom()*4>>0];
                     if (chara1 instanceof Unit){
                         chara1.x+=colPos[0];
                         chara1.y+=colPos[1];
@@ -274,7 +274,7 @@ var Referee={
                 var distLimit=Unit.meleeRange;
                 //Separate override ones
                 if (dist==0) {
-                    var colPos=Referee._pos[Math.random()*4>>0];
+                    var colPos=Referee._pos[Game.getNextRandom()*4>>0];
                     chara1.x+=colPos[0];
                     chara1.y+=colPos[1];
                     dist=1;
@@ -344,36 +344,77 @@ var Referee={
                 //Can give birth to 3 larvas
                 for(var N=0;N<3;N++){
                     if (chara.larvas[N]==null || chara.larvas[N].status=="dead"){
-                        chara.larvas[N]=new Zerg.Larva({x:(chara.x+N*48),y:(chara.y+chara.height),team:chara.team});
+                        chara.larvas[N]=new Zerg.Larva({x:(chara.x+N*48),y:(chara.y+chara.height+4),team:chara.team});
+                        chara.larvas[N].owner=chara;
                         break;
                     }
                 }
             });
         }
     },
+    judgeBuildingInjury:function(){
+        //Every 1 sec
+        if (Game.mainTick%10==0){
+            Building.allBuildings.filter(function(build){
+                return build.injuryOffsets;
+            }).forEach(function(build){
+                var injuryLevel=(1-build.life/build.HP)/0.25>>0;
+                if (injuryLevel>3) injuryLevel=3;
+                var curLevel=build.injuryAnimations.length;
+                if (injuryLevel>curLevel){
+                    var offsets=build.injuryOffsets;
+                    var scale=build.injuryScale?build.injuryScale:1;
+                    for (var N=curLevel;N<injuryLevel;N++){
+                        //Add injury animations
+                        build.injuryAnimations.push(new Animation[build.injuryNames[N]]({target:build,offset:offsets[N],scale:scale}));
+                    }
+                    if ((build instanceof Building.TerranBuilding) || (build instanceof Building.ProtossBuilding)){
+                        if (injuryLevel>1) build.sound.selected=build.sound.onfire;
+                    }
+                }
+                if (injuryLevel<curLevel){
+                    for (var N=curLevel;N>injuryLevel;N--){
+                        //Clear injury animations
+                        build.injuryAnimations.pop().die();
+                    }
+                    if ((build instanceof Building.TerranBuilding) || (build instanceof Building.ProtossBuilding)){
+                        if (injuryLevel<=1) build.sound.selected=build.sound.normal;
+                    }
+                }
+            });
+        }
+    },
     judgeMan:function(){
-        //Update our current man and total man
-        var curMan=0,totalMan=0;
-        Unit.allOurUnits().concat(Building.ourBuildings()).forEach(function(chara){
-            if (chara.cost && chara.cost.man) curMan+=chara.cost.man;
-            if (chara.manPlus) totalMan+=chara.manPlus;
+        //Update current man and total man for all teams
+        var curMan=Game.getPropArray(0),totalMan=Game.getPropArray(0);
+        Unit.allUnits.concat(Building.allBuildings).forEach(function(chara){
+            if (chara.cost && chara.cost.man) (curMan[chara.team])+=chara.cost.man;
+            if (chara.manPlus) (totalMan[chara.team])+=chara.manPlus;
+            //Transport
+            if (chara.loadedUnits) {
+                chara.loadedUnits.forEach(function(passenger){
+                    if (passenger.cost && passenger.cost.man) (curMan[passenger.team])+=passenger.cost.man;
+                });
+            }
         });
-        Resource[0].curMan=curMan;
-        Resource[0].totalMan=totalMan;
-        //Update enemy current man and total man
-        curMan=0;
-        totalMan=0;
-        Unit.allEnemyUnits().concat(Building.enemyBuildings()).forEach(function(chara){
-            if (chara.cost) curMan+=chara.cost.man;
-            if (chara.manPlus) totalMan+=chara.manPlus;
-        });
-        Resource[1].curMan=curMan;
-        Resource[1].totalMan=totalMan;
+        for (var N=0;N<Game.playerNum;N++){
+            Resource[N].curMan=curMan[N];
+            Resource[N].totalMan=totalMan[N];
+        }
     },
     judgeWinLose:function(){
-        if (Referee.loseCondition())
-            Game.lose();
-        if (Referee.winCondition())
-            Game.win();
+        //Every 1 sec
+        if (Game.mainTick%10==0){
+            if (Referee.loseCondition())
+                Game.lose();
+            if (Referee.winCondition())
+                Game.win();
+        }
+    },
+    saveReplaySnapshot:function(){
+        //Save replay snapshot every 3 sec
+        if (Game.mainTick%30==0){
+            Game.saveReplay();
+        }
     }
 };
